@@ -1,0 +1,4 @@
+<!-- ClickHouse 서버 메모리 상한: 컨테이너 한도(mem_limit 3g)의 80%. 근거: ADR 0002 결정 4 -->
+<clickhouse>
+    <max_server_memory_usage_to_ram_ratio>0.8</max_server_memory_usage_to_ram_ratio>
+</clickhouse>

@@ -20,7 +20,7 @@ flow_id는 ClickHouse 중복 제거(ReplacingMergeTree)의 키다. 그래서 같
 |---|---|---|
 | A. `"{source_file}:{id}"` 문자열 | 단순하고 사람이 읽기 쉽다. 현재 데이터에서 중복 0 | NFStream이 같은 PCAP에 같은 `id`를 다시 매긴다는 보장이 필요하다 (멀티 미터 사용 시 확인 안 됨). 문자열 키라 정렬·저장 비용이 크다 |
 | B. 랜덤 UUID (replay 시 생성) | 구현이 가장 쉽다 | 다시 replay하면 같은 플로우가 다른 ID를 받는다. **멱등 적재가 깨진다** |
-| **C. 자연키 해시 (채택)** | 결정적이고 NFStream 내부 번호에 의존하지 않는다. UInt64라 ClickHouse 키로 효율적이다 | 해시 충돌 가능성이 이론상 있다 (아래 검증) |
+| **C. 자연키 해시 (채택)** | 결정적이고 NFStream 내부 번호에 의존하지 않는다. 64비트 정수라 ClickHouse 키로 효율적이다 | 해시 충돌 가능성이 이론상 있다 (아래 검증) |
 | D. 중앙 발번 (Snowflake, DB 시퀀스) | 충돌이 없다 | 발번 서비스가 필요하다. 다시 replay하면 다른 ID를 받는다 |
 
 **선택:** C. `flow_id = BLAKE2b-64(source_file | src_ip | src_port | dst_ip | dst_port | protocol | bidirectional_first_seen_ms)`
@@ -28,6 +28,10 @@ flow_id는 ClickHouse 중복 제거(ReplacingMergeTree)의 키다. 그래서 같
 - 해시는 Python 표준 `hashlib.blake2b(digest_size=8)`라 새 라이브러리가 필요 없다.
 - 검증: 현재 데이터 364,054행에서 자연키 중복 0, 64비트 해시 중복 0.
   64비트에서 36만 개를 뽑을 때 충돌 확률은 약 3.6×10⁻⁹이다 (생일 문제 근사 n²/2⁶⁵).
+- **타입은 부호 있는 Int64다** (2026-10-26 구현 중 변경. 처음에는 UInt64로 적었다).
+  - Spark에는 부호 없는 64비트 타입이 없다. 해시값의 절반은 2⁶³ 이상이라 LongType으로 읽으면 음수가 된다.
+  - 그래서 처음부터 `int.from_bytes(digest, "big", signed=True)`로 부호 있는 값을 만들고, JSON·Spark·ClickHouse 모두 Int64로 통일한다.
+  - 64비트 그대로이므로 충돌 확률은 같다. JSON에는 문자열이 아니라 정수로 싣는다 (Python과 Spark는 Int64를 정확히 읽는다).
 - 추적용으로 `source_file`, `nfstream_id`도 함께 보낸다.
 - 부하 테스트에서는 replay가 이 값에 run_id를 섞어 새 flow_id를 만들 수 있다 (결정 2-4). 기본 모드에서는 이 값을 그대로 쓴다.
 - IP·포트를 해시 입력으로 쓰지만, 레코드를 **식별**하는 데만 쓰고 모델 **피처**로는 쓰지 않는다.
@@ -104,8 +108,8 @@ flow_id는 ClickHouse 중복 제거(ReplacingMergeTree)의 키다. 그래서 같
 ```json
 {
   "schema_version": 1,
-  "flow_id": "9f2c4e1a7b3d5e60",
-  "base_flow_id": "9f2c4e1a7b3d5e60",
+  "flow_id": -7012345678901234567,
+  "base_flow_id": -7012345678901234567,
   "run_id": "20261026T180000",
   "loop_idx": 0,
   "source_file": "skype_audio1a.pcap",
@@ -186,6 +190,25 @@ flow_id는 ClickHouse 중복 제거(ReplacingMergeTree)의 키다. 그래서 같
 - 공식 이미지를 우선한다: `apache/kafka`, `apache/spark`, `clickhouse/clickhouse-server`.
 - 버전은 compose 작성 시 확인해서 고정한다. Spark–Kafka 커넥터와 ClickHouse JDBC 드라이버의 Spark/Scala 버전 호환을 같이 확인한다.
 
+**고정한 버전 (2026-10-26 확인, Docker Hub 태그 목록 기준)**
+
+| 서비스 | 이미지 태그 | digest | 고른 이유 |
+|---|---|---|---|
+| Kafka | `apache/kafka:4.3.2` | `sha256:852a0d49fc4e…c227a7` | 4.4.0은 확인 시점에 공개 4일째인 새 마이너라 피했다. 2026-05부터 쓰인 4.3 라인의 최신 패치 |
+| ClickHouse | `clickhouse/clickhouse-server:26.8.35.10` | `sha256:6dcf22140756…4b960f7b` | 26.8은 LTS 라인. 26.9/26.10은 일반(stable) 릴리스라 지원 기간이 짧다. 전체 버전까지 고정 |
+| Spark | (미정) | | Spark 추가 작업 때 커넥터 호환과 함께 정한다 |
+
+- 전체 digest는 `docker image inspect <image> --format '{{index .RepoDigests 0}}'`로 확인할 수 있다.
+  - Kafka: `sha256:852a0d49fc4e656b022e7f23785411802c9a088c78a7c5e39f33969de9c227a7`
+  - ClickHouse: `sha256:6dcf2214075602b48a09c1b62c01bd0b738ee126f60f82297334e9024b960f7b`
+- compose에는 태그만 쓴다. 태그가 다시 푸시되어 내용이 바뀌었는지 의심되면 위 digest와 비교한다.
+
+**실행 엔진 (구현 중 확인):** WSL Ubuntu 안의 `docker`는 Docker Desktop이 아니라 Ubuntu에 직접 설치된 엔진이다 (서버 29.8.0, 데이터 경로 `/var/snap/docker`).
+WSL2 배포판은 모두 같은 VM을 쓰므로, 메모리 전제(약 16 GB)는 같다.
+
+**처음 띄웠을 때 메모리 사용 (빈 상태):** kafka 322 MiB / 2 GiB, clickhouse 144 MiB / 3 GiB.
+ClickHouse 서버 메모리 상한은 `max_server_memory_usage_to_ram_ratio=0.8` → 2.40 GiB로 확인했다.
+
 ### 서비스별 메모리 배분
 
 | 서비스 | 도입 단계 | 메모리 한도 (`mem_limit`) | 내부 설정 |
@@ -254,4 +277,4 @@ flow_id는 ClickHouse 중복 제거(ReplacingMergeTree)의 키다. 그래서 같
 1. **a/b 이중 계상.** a/b는 같은 대화를 두 지점에서 캡처한 것이다. 동시 재생하면 유형별 트래픽 양이 두 번 잡힌다.
    관측 지점이 두 곳인 네트워크로 보고 그대로 둘지, 집계할 때 `session_id`별로 한쪽만 셀지 6단계 대시보드 설계에서 정한다.
 2. **NFStream 추출의 결정성.** 채택안 C는 NFStream `id`에 의존하지 않는다. 하지만 같은 PCAP을 다시 추출했을 때 `first_seen_ms`와 5-tuple이 같게 나오는지는 4단계 재처리 전에 한 번 확인한다.
-3. **이미지·커넥터 버전 호환.** Spark 버전, Kafka 커넥터(`spark-sql-kafka`), ClickHouse JDBC 드라이버 조합을 compose 작성 때 확인하고 이 문서에 기록한다.
+3. **이미지·커넥터 버전 호환.** Kafka와 ClickHouse는 고정했다 (결정 4). Spark 버전, Kafka 커넥터(`spark-sql-kafka`), ClickHouse JDBC 드라이버 조합은 Spark를 추가할 때 확인하고 이 문서에 기록한다.

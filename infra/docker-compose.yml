@@ -1,0 +1,76 @@
+# 2단계 최소 파이프라인 인프라. 설계 근거: docs/adr/0002-pipeline-design.md
+# 지금은 Kafka와 ClickHouse만 띄운다. Spark와 replay는 다음 작업에서 추가한다.
+#
+#   docker compose -f infra/docker-compose.yml up -d
+#
+# 포트는 모두 127.0.0.1에만 연다 (로컬 개발용).
+
+name: capstone2
+
+services:
+  kafka:
+    image: apache/kafka:4.3.2
+    container_name: kafka
+    hostname: kafka
+    ports:
+      - "127.0.0.1:9094:9094"   # 호스트(WSL venv)에서 접속하는 리스너
+    environment:
+      # KRaft 단일 노드: 한 프로세스가 broker와 controller를 같이 맡는다 (ZooKeeper 없음)
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      # 리스너 3개: 컨테이너끼리(PLAINTEXT), controller 내부용, 호스트용(EXTERNAL)
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:9094
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:9094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      # 브로커가 1개라 내부 토픽 복제 수를 1로 낮춘다
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      # 토픽은 명시적으로 만든다 (오타로 엉뚱한 토픽이 생기는 것 방지)
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_HEAP_OPTS: "-Xmx1g -Xms1g"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    mem_limit: 2g
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 20s
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:26.8.35.10
+    container_name: clickhouse
+    hostname: clickhouse
+    ports:
+      - "127.0.0.1:8123:8123"   # HTTP (JDBC, Grafana)
+      - "127.0.0.1:9000:9000"   # native (clickhouse-client)
+    environment:
+      CLICKHOUSE_DB: capstone
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-capstone}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-capstone-dev}   # 로컬 개발용 기본값. infra/.env.example 참고
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+      - ./clickhouse/config.d/memory.xml:/etc/clickhouse-server/config.d/memory.xml:ro
+      - ./clickhouse/schema:/schema:ro
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    mem_limit: 3g
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8123/ping | grep -q Ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+volumes:
+  kafka-data:
+  clickhouse-data:

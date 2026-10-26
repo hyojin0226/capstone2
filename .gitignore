@@ -13,6 +13,7 @@ __pycache__/
 # 로컬 설정, 비밀값
 .env
 .env.*
+!.env.example
 
 # 에디터, OS
 .vscode/
