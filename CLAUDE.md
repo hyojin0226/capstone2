@@ -63,5 +63,8 @@ docs/              # 설계 결정 기록(ADR), 성능 실험 결과
   - [x] Kafka + ClickHouse compose, `flows.raw` 토픽, `flows_raw` 테이블 (infra/)
   - [x] flow_id 추가 (`src/extract/flow_id.py`, 364,054행 중복 0)
   - [x] replay producer (`src/replay/producer.py`, confluent-kafka 2.16.0). `--limit 1000` 검증 완료, `flows.raw`에 검증용 1,000건 있음
-  - [ ] Spark Structured Streaming → ClickHouse
+  - [x] Spark Structured Streaming → ClickHouse (`src/streaming/flows_to_clickhouse.py`, 커스텀 이미지 `capstone2/spark:4.1.3`)
+    - F2는 지우지 않고 `f2_passed`로 표시. 체크포인트 `/checkpoints/flows_raw`(볼륨 `spark-checkpoints`). 추론 없음
+    - 전체 364,054건 100배속: 전송 = Kafka offset 합계 = ClickHouse 행 수, 중복 0, F2 불일치 0 (docs/step2-pipeline.md 6절)
+  - [ ] 2단계 장애 테스트: Spark 강제 종료 후 재시작, 중복 = count() − uniqExact(flow_id) (ADR 0002 결정 5 "검증")
 - [ ] 3단계 스트리밍 처리: 모델 직렬화 형식 결정, Spark 추론, 품질 검사, 멱등 적재

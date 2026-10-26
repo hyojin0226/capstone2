@@ -2,12 +2,13 @@
 
 2단계 최소 파이프라인용 docker-compose. 설계 근거와 이미지 버전: [docs/adr/0002-pipeline-design.md](../docs/adr/0002-pipeline-design.md)
 
-지금은 **Kafka와 ClickHouse만** 띄운다. Spark와 replay는 아직 없다.
+Kafka, ClickHouse, Spark 스트리밍 잡을 띄운다. replay는 호스트 venv에서 `localhost:9094`로 보낸다.
 
 | 서비스 | 이미지 | 호스트 포트 (127.0.0.1) | 메모리 한도 |
 |---|---|---|---|
 | kafka | `apache/kafka:4.3.2` (KRaft 단일 노드) | 9094 (호스트용 리스너) | 2 GB |
 | clickhouse | `clickhouse/clickhouse-server:26.8.35.10` | 8123 (HTTP), 9000 (native) | 3 GB |
+| spark | `capstone2/spark:4.1.3` (`infra/spark/Dockerfile`로 빌드) | 4040 (Spark UI) | 4 GB |
 
 명령은 모두 WSL의 레포 루트(`~/capstone2`)에서 실행한다.
 
@@ -117,8 +118,72 @@ docker exec clickhouse clickhouse-client --user capstone --password capstone-dev
 docker exec clickhouse clickhouse-client --user capstone --password capstone-dev -q "SELECT count() FROM system.columns WHERE database='capstone' AND table='flows_raw'"
 ```
 
+이미 만든 테이블에 Spark 잡용 컬럼(`f2_passed`, `kafka_*`)을 추가하기 (여러 번 실행해도 된다):
+
+```bash
+docker exec clickhouse clickhouse-client --user capstone --password capstone-dev --queries-file /schema/002_quality_and_kafka_columns.sql
+```
+
 중복 확인 쿼리 (장애 테스트용, ADR 0002 결정 5):
 
 ```bash
 docker exec clickhouse clickhouse-client --user capstone --password capstone-dev -q "SELECT count() AS rows, uniqExact(flow_id) AS flows, rows - flows AS duplicates FROM capstone.flows_raw"
+```
+
+## 4. Spark 스트리밍 잡
+
+`flows.raw` → F2 표시 → `capstone.flows_raw`. 코드는 `src/`를 읽기 전용으로 마운트해서 쓰므로, 코드를 고친 뒤에는 컨테이너만 다시 시작하면 된다.
+
+```bash
+docker compose -f infra/docker-compose.yml up -d --build spark
+```
+
+배치 로그 (`[batch N] rows=… written=… parse_failed=…`):
+
+```bash
+docker logs -f spark 2>&1 | grep -E "^started:|^\[batch"
+```
+
+Spark UI: http://127.0.0.1:4040 (Structured Streaming 탭)
+
+### 처음부터 다시 (토픽·테이블·체크포인트 초기화)
+
+토픽을 새로 만들면 체크포인트의 offset이 맞지 않으므로 **셋을 함께** 초기화한다.
+
+```bash
+docker compose -f infra/docker-compose.yml stop spark
+```
+
+```bash
+docker compose -f infra/docker-compose.yml rm -f spark
+```
+
+```bash
+docker volume rm capstone2_spark-checkpoints
+```
+
+```bash
+docker exec kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --delete --topic flows.raw
+```
+
+```bash
+docker exec kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic flows.raw --partitions 3 --replication-factor 1
+```
+
+```bash
+docker exec clickhouse clickhouse-client --user capstone --password capstone-dev -q "TRUNCATE TABLE capstone.flows_raw"
+```
+
+```bash
+docker compose -f infra/docker-compose.yml up -d spark
+```
+
+### 보낸 개수 = 적재 행 수 확인
+
+```bash
+docker exec kafka /opt/kafka/bin/kafka-get-offsets.sh --bootstrap-server kafka:9092 --topic flows.raw
+```
+
+```bash
+docker exec clickhouse clickhouse-client --user capstone --password capstone-dev -q "SELECT kafka_partition, count(), max(kafka_offset)+1 FROM capstone.flows_raw GROUP BY 1 ORDER BY 1"
 ```

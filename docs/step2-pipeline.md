@@ -6,8 +6,8 @@
 |---|---|
 | Kafka (KRaft 단일 브로커), ClickHouse, `flows.raw` 토픽, `flows_raw` 테이블 | 완료 ([infra/README.md](../infra/README.md)) |
 | flow_id (추출 단계) | 완료 (아래 1) |
-| replay producer | 완료 (아래 2, 3) |
-| Spark Structured Streaming → ClickHouse | 아직 없음 |
+| replay producer | 완료 (아래 2, 3, 4) |
+| Spark Structured Streaming → ClickHouse (F2 표시, 추론 없음) | 완료 (아래 5, 6) |
 
 ## 1. flow_id 추가 (2026-10-26)
 
@@ -161,7 +161,117 @@ producer의 delivery report(1,000건 성공, 실패 0)와 브로커 오프셋 �
   1000배속 요구량은 약 15만 msg/s(20,000건 ÷ 0.13초)라 따라가지 못했다. 메시지 생성(JSON 직렬화)과 Python 루프가 한계로 추정되며, 5단계에서 확인한다.
 - `--run-id-in-hash --loop 2`도 2,000건이 회차마다 새 flow_id로 전송됐다.
 
+## 5. Spark Structured Streaming 잡 (`src/streaming/flows_to_clickhouse.py`)
+
+```
+Kafka flows.raw ─readStream─▶ from_json(명시적 스키마) → 펼치기 → f2_passed 계산 ─foreachBatch(5초)─▶ JDBC ─▶ capstone.flows_raw
+                              체크포인트: /checkpoints/flows_raw (docker 볼륨 spark-checkpoints)
+```
+
+### 버전 (2026-10-26 확인)
+
+| 구성요소 | 버전 | 고른 이유 |
+|---|---|---|
+| Spark 이미지 | `apache/spark:4.1.3-scala2.13-java17-python3-ubuntu` | 4.2.0은 7월에 나온 새 마이너. 4.1 라인의 패치 버전을 쓴다. Python 3.10, Java 17 |
+| Kafka 소스 | `spark-sql-kafka-0-10_2.13:4.1.3` + `spark-token-provider-kafka-0-10_2.13:4.1.3` | Spark 버전과 정확히 같아야 한다 |
+| Kafka 클라이언트 | `kafka-clients:3.9.1`, `commons-pool2:2.12.1` | spark-sql-kafka 4.1.3 pom에 적힌 버전. 3.9 클라이언트는 4.3 브로커와 호환된다 |
+| ClickHouse JDBC | `clickhouse-jdbc:0.10.0` (`-all`, shaded) | 0.11.0은 확인 시점에 공개 5일째라 피했다 (0.10.0은 2026-08-17) |
+
+- 커스텀 이미지 `capstone2/spark:4.1.3` (`infra/spark/Dockerfile`)에 jar 5개를 넣었다.
+  각 jar는 Maven Central의 sha1으로 확인한 뒤 sha256을 `ADD --checksum`으로 고정했다. 받은 파일이 다르면 빌드가 실패한다.
+- `--packages`로 실행할 때마다 내려받지 않으므로 시작이 빠르고 오프라인에서도 재현된다.
+- 기본 이미지에 이미 있는 의존성(scala-parallel-collections 1.2.0, jsr305, lz4/snappy/zstd)은 다시 넣지 않았다.
+
+### 처리 내용
+
+- **파싱:** 메시지 JSON을 ADR 스키마대로 만든 `StructType`으로 파싱한다. 파싱에 실패하면(`flow_id`가 null) 적재하지 않고 배치 로그에 `parse_failed`로 센다.
+  잘못된 메시지를 따로 보관하는 dead-letter 처리는 3단계 품질 검사에서 다룬다.
+- **F2 표시:** `f2_passed = NOT is_background(...)`. 배경 트래픽도 지우지 않고 모두 적재한다.
+  그래야 "보낸 개수 = 적재 행 수"로 손실을 검증할 수 있고, 대시보드에서 배경 트래픽 양도 볼 수 있다.
+  - 규칙 상수(TCP/UDP, 인프라 포트)는 `src/extract/rules.py` 하나에 두고 오프라인 `labeling.py`와 Spark가 함께 쓴다.
+  - IP 판정(멀티캐스트, 링크로컬 등)은 Python `ipaddress`를 Spark 문자열 규칙으로 옮겼다 (`src/streaming/f2_filter.py`).
+    데이터의 IPv6 180개는 모두 표준 압축 소문자 표기이고 IPv4-mapped 주소가 없어서, 문자열 규칙으로 같은 결과가 나온다 (아래 대조).
+- **Kafka 위치 컬럼:** `kafka_partition`, `kafka_offset`, `kafka_timestamp_ms`를 함께 적재한다. 누락 확인과 추적에 쓴다.
+- **쓰기:** `foreachBatch` + JDBC, `batchsize=20000`, `isolationLevel=NONE`. 배치마다 `spark_processed_ms`(ReplacingMergeTree version)를 붙인다.
+- **설정:** 트리거 5초, `maxOffsetsPerTrigger=50000`, `startingOffsets=earliest`(체크포인트가 없을 때만), `local[*]`, driver 3 GB.
+
+### 스키마 변경
+
+`flows_raw`에 4개 컬럼을 추가했다. 모두 키(ORDER BY)에는 넣지 않는다.
+- `f2_passed Bool`
+- `kafka_partition UInt16`, `kafka_offset Int64`, `kafka_timestamp_ms Int64`
+
+새로 만들 때는 `001_flows_raw.sql`에 들어 있다. 이미 만든 테이블에는 `002_quality_and_kafka_columns.sql`(`ADD COLUMN IF NOT EXISTS`)을 실행한다.
+
+## 6. 검증: 보낸 개수 = ClickHouse 행 수 (2026-10-26)
+
+### 6-1. smoke test: 기존 1,000건
+
+`flows.raw`에 남아 있던 검증용 1,000건으로 먼저 돌렸다.
+- 배치 0: `rows=1000 written=1000 parse_failed=0`
+- ClickHouse: 1000행, 고유 flow_id 1000
+- 파티션별 348/348/304, offset 0부터 끝까지 빠짐없음
+- F2: 오프라인 규칙과 1000건 모두 일치 (통과 175)
+- 예시 메시지(DNS, dst_port 53)가 `f2_passed=false`로 판정됐다
+
+### 6-2. 본 검증: 전체 364,054건, 100배속
+
+깨끗한 상태에서 시작했다. 토픽을 새로 만들면 기존 체크포인트의 offset이 맞지 않으므로 체크포인트도 함께 지웠다.
+
+```bash
+docker compose -f infra/docker-compose.yml stop spark && docker compose -f infra/docker-compose.yml rm -f spark
+docker volume rm capstone2_spark-checkpoints
+# flows.raw 삭제 후 재생성 (파티션 3), TRUNCATE TABLE capstone.flows_raw
+docker compose -f infra/docker-compose.yml up -d spark
+python src/replay/producer.py --speed 100 --run-id full-x100
+```
+
+replay:
+
+```
+loaded 364,054 flows (57 features) in 11.9s | run_id=full-x100 speed=100.0 loop=1 run_id_in_hash=False
+sent 364,054 | delivered 364,054 | failed 0 | unflushed 0
+send loop 58.86s (expected per loop 58.86s = timeline span ÷ speed, loops 1) | final flush 0.00s | 6,185 msg/s
+per partition: {0: 121462, 1: 121444, 2: 121148}
+```
+
+| 확인 항목 | 결과 |
+|---|---|
+| replay 전송 성공 (delivery report) | 364,054 |
+| Kafka offset 합계 | 364,054 (121,462 / 121,444 / 121,148) |
+| Spark 배치 | 14개 (0–13), `parse_failed` 합계 0 |
+| **ClickHouse `count()`** | **364,054** |
+| `uniqExact(flow_id)` / 중복 | 364,054 / **0** |
+| 고유 (kafka_partition, kafka_offset) | 364,054 |
+| 파티션별 ClickHouse 행 수, offset 범위 | 0: 121,462 [0, 121462) · 1: 121,444 [0, 121444) · 2: 121,148 [0, 121148). Kafka와 정확히 같다 |
+| parquet ↔ ClickHouse flow_id 대조 | 한쪽에만 있는 행 0 / 0 |
+| **F2 판정 불일치 (Spark vs 오프라인 `is_background`)** | **0 / 364,054** |
+| F2 통과 수 | Spark 8,758 = 오프라인 8,758 (4단계 `flows_labeled.parquet`과 같다) |
+| F2 통과 & 노이즈 의심 아님 | 5,361 (5단계 baseline의 clean 집합과 같은 수) |
+
+**보낸 개수, Kafka offset 합계, ClickHouse 행 수가 모두 364,054로 일치한다.** 손실도 중복도 없다.
+Spark의 F2 구현은 전체 데이터에서 오프라인 규칙과 한 건도 다르지 않다.
+
+### 6-3. 체크포인트 동작
+
+- 처리 후 체크포인트: `offsets/13`, `commits/13`. 마지막 offset이 `{"flows.raw":{"0":121462,"1":121444,"2":121148}}`로 Kafka 끝과 같다.
+- `docker compose restart spark` 후 잡이 다시 시작됐지만 새 배치가 생기지 않았다. ClickHouse 행 수는 364,054 그대로였다.
+  → 체크포인트에서 이어서 읽고, 처음부터 다시 읽지 않는다.
+
+### 6-4. 참고: 지연과 자원 (튜닝 전, 1회 측정)
+
+| 지표 | 값 |
+|---|---|
+| E2E (`inserted_at − replay_sent_ms`) | p50 4.6 s, p90 6.5 s, p99 7.8 s, 최대 8.2 s |
+| Spark 배치 처리 → ClickHouse 적재 (`inserted_at − spark_processed_ms`) | p50 0.46 s, p99 1.4 s |
+| 배치 크기, 처리 시간 | 약 18,400행, 약 1.0 s |
+| 메모리 (처리 직후) | kafka 1.13 GiB / 2 GiB, clickhouse 319 MiB / 3 GiB, spark 2.01 GiB / 4 GiB |
+
+- E2E의 대부분은 **5초 트리거 대기**다. 배치 처리 자체는 약 1초다. 트리거 간격과 지연의 관계는 5단계에서 실험한다.
+- 측정 범위는 수집기 출력 이후 파이프라인 구간이다 (NFStream idle timeout 제외, ADR 0002).
+
 ## 메모
 
 - `kafka-console-consumer.sh`의 `--property`는 deprecated 경고가 나온다 (Kafka 4.3). 키를 출력할 때는 `--formatter-property print.key=true`를 쓴다.
-- `flows.raw`에는 지금 검증용 1,000건(run_id `verify-limit1000`)이 들어 있다. Spark 잡 개발에 그대로 쓴다.
+- ClickHouse의 `DateTime64` 표시는 서버 시간대(UTC) 기준이다. KST로 보려면 `toTimeZone(inserted_at, 'Asia/Seoul')`를 쓴다.
+- 지금 `flows.raw`와 `flows_raw`에는 전체 1회 재생분(run_id `full-x100`, 364,054건)이 들어 있다.

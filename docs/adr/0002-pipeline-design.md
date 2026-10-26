@@ -201,7 +201,7 @@ replay producer는 `confluent-kafka 2.16.0`(librdkafka)을 쓴다. 후보 비교
 |---|---|---|---|
 | Kafka | `apache/kafka:4.3.2` | `sha256:852a0d49fc4e…c227a7` | 4.4.0은 확인 시점에 공개 4일째인 새 마이너라 피했다. 2026-05부터 쓰인 4.3 라인의 최신 패치 |
 | ClickHouse | `clickhouse/clickhouse-server:26.8.35.10` | `sha256:6dcf22140756…4b960f7b` | 26.8은 LTS 라인. 26.9/26.10은 일반(stable) 릴리스라 지원 기간이 짧다. 전체 버전까지 고정 |
-| Spark | (미정) | | Spark 추가 작업 때 커넥터 호환과 함께 정한다 |
+| Spark | `apache/spark:4.1.3-scala2.13-java17-python3-ubuntu` → 커스텀 `capstone2/spark:4.1.3` | `sha256:9b0a6c2c860f…a02ab3e` (기본 이미지) | 4.2.0은 7월에 나온 새 마이너라 4.1 라인 패치를 쓴다. Kafka 소스 4.1.3, kafka-clients 3.9.1, commons-pool2 2.12.1, clickhouse-jdbc 0.10.0(-all) jar를 sha256 고정으로 넣었다 (`infra/spark/Dockerfile`, 상세: docs/step2-pipeline.md 5절) |
 
 - 전체 digest는 `docker image inspect <image> --format '{{index .RepoDigests 0}}'`로 확인할 수 있다.
   - Kafka: `sha256:852a0d49fc4e656b022e7f23785411802c9a088c78a7c5e39f33969de9c227a7`
@@ -247,6 +247,9 @@ ClickHouse 서버 메모리 상한은 `max_server_memory_usage_to_ram_ratio=0.8`
   - 조회는 `FINAL` 또는 `argMax`로 중복을 제거한다.
   - CLAUDE.md 원칙대로 exactly-once는 주장하지 않는다. "중복은 들어올 수 있고, flow_id로 수렴한다"는 것을 장애 테스트로 보여준다 (아래 "검증").
 - 2단계 테이블은 `flows_raw` 하나다 (메시지 필드를 펼쳐서 저장). 예측 결과 컬럼과 윈도우 집계 테이블은 3단계에서 추가한다.
+- 구현하면서 추가한 컬럼 (2026-10-26, 모두 키에는 넣지 않는다):
+  - `f2_passed`: 배경 트래픽 필터 결과. 행을 지우지 않고 표시만 해서 "보낸 개수 = 적재 행 수"로 손실을 검증할 수 있게 한다
+  - `kafka_partition`, `kafka_offset`, `kafka_timestamp_ms`: 누락 확인과 추적용
 
 ### 파티션 키와 정렬 키는 결정적인 값으로만
 
@@ -285,4 +288,4 @@ ClickHouse 서버 메모리 상한은 `max_server_memory_usage_to_ram_ratio=0.8`
 2. ~~**NFStream 추출의 결정성.**~~ **해결 (2026-10-26).** PCAP 2개를 다시 추출해 보니 flow_id 집합이 완전히 같았다.
    반면 NFStream `id` → 플로우 대응은 실행마다 바뀌었다 (email1a). 대안 A를 버리고 C를 고른 판단이 맞았다. 상세: docs/step2-pipeline.md 1절.
    4단계에서 전체 PCAP을 재처리할 때 같은 검사를 전체 규모로 반복한다.
-3. **이미지·커넥터 버전 호환.** Kafka와 ClickHouse는 고정했다 (결정 4). Spark 버전, Kafka 커넥터(`spark-sql-kafka`), ClickHouse JDBC 드라이버 조합은 Spark를 추가할 때 확인하고 이 문서에 기록한다.
+3. ~~**이미지·커넥터 버전 호환.**~~ **해결 (2026-10-26).** Spark 4.1.3 + spark-sql-kafka 4.1.3(kafka-clients 3.9.1) + clickhouse-jdbc 0.10.0 조합으로 Kafka 4.3.2 → ClickHouse 26.8 적재를 364,054건 전량 검증했다 (결정 4 표, docs/step2-pipeline.md 6절).

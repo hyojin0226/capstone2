@@ -7,21 +7,13 @@ ISCX VPN-nonVPN은 PCAP 파일명이 곧 라벨이다 (예: facebook_audio1a →
 
 import ipaddress
 import re
+import sys
+from pathlib import Path
 
 import pandas as pd
 
-# LAN 안에서만 쓰이는 인프라 서비스 포트. 서비스 유형과 무관한 배경 트래픽이다.
-INFRA_PORTS = {
-    53,          # DNS
-    67, 68,      # DHCP
-    123,         # NTP
-    137, 138, 139,  # NetBIOS
-    161, 162,    # SNMP
-    546, 547,    # DHCPv6
-    1900,        # SSDP
-    5353,        # mDNS
-    5355,        # LLMNR
-}
+sys.path.insert(0, str(Path(__file__).parent))
+from rules import INFRA_PORTS, SERVICE_PROTOCOLS  # noqa: E402  (Spark 잡과 같은 상수)
 
 
 def _is_lan_only(ip: str) -> bool:
@@ -37,7 +29,7 @@ def _is_lan_only(ip: str) -> bool:
 
 def is_background(df: pd.DataFrame) -> pd.Series:
     """True = 배경 트래픽 (라벨 대상에서 제외)."""
-    not_tcp_udp = ~df["protocol"].isin([6, 17])
+    not_tcp_udp = ~df["protocol"].isin(SERVICE_PROTOCOLS)
     lan_only = df["src_ip"].map(_is_lan_only) | df["dst_ip"].map(_is_lan_only)
     infra = df["src_port"].isin(INFRA_PORTS) | df["dst_port"].isin(INFRA_PORTS)
     return not_tcp_udp | lan_only | infra

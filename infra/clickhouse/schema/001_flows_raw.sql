@@ -94,6 +94,14 @@ CREATE TABLE IF NOT EXISTS capstone.flows_raw
     label_session_id                LowCardinality(String),
     label_noise_suspect             Bool,
 
+    -- 품질 검사 (Spark에서 판정. 002_quality_and_kafka_columns.sql로 추가된 컬럼)
+    f2_passed                       Bool,       -- 배경 트래픽 필터 F2 통과 = 서비스 트래픽 후보. 지우지 않고 표시만 한다
+
+    -- Kafka 위치 (추적·누락 확인용)
+    kafka_partition                 UInt16,
+    kafka_offset                    Int64,
+    kafka_timestamp_ms              Int64,
+
     -- 시각 (epoch ms). 지연 = inserted_at - replay_sent_ms (수집기 출력 이후 구간만)
     orig_first_seen_ms              Int64,      -- 원본 캡처 시각 (결정적)
     orig_last_seen_ms               Int64,
