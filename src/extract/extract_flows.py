@@ -1,7 +1,8 @@
-"""PCAP 한 개 → NFStream 플로우 레코드 → parquet.
+"""PCAP → NFStream 플로우 레코드 → parquet (PCAP 한 개당 parquet 한 개).
 
 사용법:
-    python src/extract/extract_flows.py data/raw/<file>.pcap [--out-dir data/flows]
+    python src/extract/extract_flows.py data/raw/<file>.pcap [더 많은 파일 ...] [--out-dir data/flows]
+    python src/extract/extract_flows.py data/raw/nonvpn-01/*        # 폴더 전체
 
 출력: data/flows/<pcap 파일명>.parquet
 - 한 행 = 한 플로우 (5-tuple + 시간 기준으로 묶인 양방향 패킷 묶음)
@@ -33,20 +34,20 @@ def extract(pcap_path: Path, out_dir: Path) -> Path:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("pcap", type=Path)
+    parser.add_argument("pcaps", type=Path, nargs="+")
     parser.add_argument("--out-dir", type=Path, default=Path("data/flows"))
     args = parser.parse_args()
 
-    start = time.perf_counter()
-    out_path = extract(args.pcap, args.out_dir)
-    elapsed = time.perf_counter() - start
-
     import pandas as pd
 
-    df = pd.read_parquet(out_path)
-    print(f"input : {args.pcap} ({args.pcap.stat().st_size / 1e6:.1f} MB)")
-    print(f"output: {out_path} ({out_path.stat().st_size / 1e6:.2f} MB)")
-    print(f"flows : {len(df):,}  columns: {df.shape[1]}  elapsed: {elapsed:.1f}s")
+    total_start = time.perf_counter()
+    for pcap in sorted(args.pcaps):
+        start = time.perf_counter()
+        out_path = extract(pcap, args.out_dir)
+        elapsed = time.perf_counter() - start
+        n_flows = len(pd.read_parquet(out_path, columns=["id"]))
+        print(f"{pcap.name:<28} {pcap.stat().st_size / 1e6:8.1f} MB → {n_flows:>8,} flows  {elapsed:6.1f}s")
+    print(f"done: {len(args.pcaps)} files in {time.perf_counter() - total_start:.1f}s → {args.out_dir}")
 
 
 if __name__ == "__main__":
