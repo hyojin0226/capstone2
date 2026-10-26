@@ -97,6 +97,12 @@ CREATE TABLE IF NOT EXISTS capstone.flows_raw
     -- 품질 검사 (Spark에서 판정. 002_quality_and_kafka_columns.sql로 추가된 컬럼)
     f2_passed                       Bool,       -- 배경 트래픽 필터 F2 통과 = 서비스 트래픽 후보. 지우지 않고 표시만 한다
 
+    -- 모델 추론 (Spark mapInPandas. 003_inference_columns.sql로 추가된 컬럼, ADR 0003 결정 3)
+    inferred                        Bool,                   -- 추론했는지 (추론 대상: f2_passed)
+    pred_service_class              LowCardinality(String), -- 예측 클래스. 추론 안 했으면 ''
+    pred_confidence                 Float32,                -- 예측 클래스의 확률. 추론 안 했으면 0
+    model_version                   LowCardinality(String), -- 예측에 쓴 모델. 추론 안 했으면 ''
+
     -- Kafka 위치 (추적·누락 확인용)
     kafka_partition                 UInt16,
     kafka_offset                    Int64,

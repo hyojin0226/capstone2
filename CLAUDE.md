@@ -72,5 +72,7 @@ docs/              # 설계 결정 기록(ADR), 성능 실험 결과
   - [x] 런타임 맞추기: 학습·Spark 모두 xgboost-cpu 3.2.0 (Spark 이미지 Python 3.10). baseline 재학습 0.521 ± 0.022
   - [x] 모델 직렬화: `src/model/export_model.py` → `models/xgb-20261027-289d0474/` (model.json + metadata.json, git 제외)
   - [x] 환경 간 예측 일치: WSL ↔ Spark 이미지 8,758건 불일치 0, 확률 차이 0.0 (`src/model/predict_file.py`)
-  - [ ] Spark 추론 (mapInPandas, f2_passed AND quality_ok 행만)
+  - [x] Spark 추론 (`src/streaming/inference.py`, mapInPandas). 현재 대상 = f2_passed (품질 검사 후 AND quality_ok 추가)
+    - 전체 364,054건: 추론 8,758 = F2 통과 수, 오프라인 예측과 클래스·확률 불일치 0 (docs/step3-streaming.md 5절)
+    - 초기화는 `infra/scripts/reset_pipeline.sh`
   - [ ] 품질 검사 (flows_rejected, quality_flags, pipeline_batches) + replay 오류 주입 검증

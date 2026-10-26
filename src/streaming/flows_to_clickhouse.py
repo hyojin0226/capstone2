@@ -3,9 +3,9 @@
 설계: docs/adr/0002-pipeline-design.md 결정 3(메시지 스키마), 5(쓰기 방식)
 - JSON을 명시적 스키마로 파싱해서 펼친다. 파싱에 실패한 레코드는 적재하지 않고 배치마다 개수를 로그로 남긴다
 - 배경 트래픽 필터 F2는 지우지 않고 f2_passed 컬럼으로 표시만 한다
+- f2_passed 행만 XGBoost로 추론한다 (inference.py, ADR 0003 결정 3). 품질 검사(quality_ok)는 아직 없다
 - foreachBatch + JDBC로 마이크로배치마다 한 번에 insert한다 (ClickHouse는 큰 insert를 드물게 받는 편이 좋다)
 - at-least-once: 장애 후 같은 배치가 다시 실행될 수 있다. 중복은 ReplacingMergeTree(flow_id)가 정리한다
-- 모델 추론은 아직 하지 않는다 (3단계)
 
 실행 (compose 서비스 spark):
     spark-submit --master local[*] /opt/app/src/streaming/flows_to_clickhouse.py
@@ -23,6 +23,7 @@ from pyspark.sql.types import (BooleanType, DoubleType, IntegerType, LongType, S
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from f2_filter import is_background  # noqa: E402
+from inference import MODEL_DIR, add_predictions, load_metadata  # noqa: E402
 
 KAFKA_BOOTSTRAP = os.environ.get("KAFKA_BOOTSTRAP", "kafka:9092")
 TOPIC = os.environ.get("KAFKA_TOPIC", "flows.raw")
@@ -102,7 +103,8 @@ def write_batch(batch: DataFrame, batch_id: int) -> None:
     batch = batch.persist()
     total = batch.count()
     bad = batch.filter(F.col("flow_id").isNull()).count()
-    good = batch.filter(F.col("flow_id").isNotNull()).withColumn(
+    to_infer = batch.filter(F.col("flow_id").isNotNull() & F.col("f2_passed")).count()
+    good = add_predictions(batch.filter(F.col("flow_id").isNotNull())).withColumn(
         "spark_processed_ms", F.lit(int(time.time() * 1000)).cast("long"))  # ReplacingMergeTree version
 
     if total > bad:
@@ -117,11 +119,15 @@ def write_batch(batch: DataFrame, batch_id: int) -> None:
          .mode("append")
          .save())
     batch.unpersist()
-    print(f"[batch {batch_id}] rows={total} written={total - bad} parse_failed={bad} "
+    print(f"[batch {batch_id}] rows={total} written={total - bad} parse_failed={bad} inferred={to_infer} "
           f"took={time.time() - t0:.2f}s", flush=True)
 
 
 def main() -> None:
+    meta = load_metadata()  # 모델이 없거나 메타데이터가 깨졌으면 스트림을 시작하기 전에 실패한다
+    print(f"model: {meta['model_version']} (xgboost {meta['xgboost_version']}, {len(meta['features'])} features) "
+          f"from {MODEL_DIR}", flush=True)
+
     spark = (SparkSession.builder.appName("flows_to_clickhouse")
              .config("spark.sql.shuffle.partitions", "3")
              .getOrCreate())

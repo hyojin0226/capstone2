@@ -27,18 +27,8 @@ ch() {  # ClickHouse HTTP 쿼리 (docker exec보다 빨라서 폴링에 쓴다)
 now_ms() { date +%s%3N; }
 log() { echo "[$(date +%T.%3N)] $*"; }
 
-log "1. 초기화 (토픽, 테이블, 체크포인트)"
-$COMPOSE stop spark >/dev/null 2>&1 || true
-$COMPOSE rm -f spark >/dev/null 2>&1 || true
-docker volume rm capstone2_spark-checkpoints >/dev/null 2>&1 || true
-$KAFKA/kafka-topics.sh --bootstrap-server kafka:9092 --delete --topic flows.raw >/dev/null 2>&1 || true
-for _ in $(seq 1 20); do $KAFKA/kafka-topics.sh --bootstrap-server kafka:9092 --list | grep -qx flows.raw || break; sleep 1; done
-$KAFKA/kafka-topics.sh --bootstrap-server kafka:9092 --create --topic flows.raw --partitions 3 --replication-factor 1 2>&1 | grep -v WARNING
-ch "TRUNCATE TABLE capstone.flows_raw"
-
-log "2. Spark 시작"
-$COMPOSE up -d spark >/dev/null 2>&1
-until docker logs spark 2>&1 | grep -q "^started:"; do sleep 1; done
+log "1-2. 초기화 (토픽, 테이블, 체크포인트) + Spark 시작"
+bash "$(dirname "$0")/reset_pipeline.sh"
 
 log "3. replay 시작 (speed=$SPEED, run_id=$RUN_ID)"
 python src/replay/producer.py --speed "$SPEED" --run-id "$RUN_ID" > "$LOG_DIR/replay.log" 2>&1 &
