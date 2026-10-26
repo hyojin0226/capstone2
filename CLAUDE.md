@@ -59,5 +59,5 @@ docs/              # 설계 결정 기록(ADR), 성능 실험 결과
   - baseline: `src/model/train_baseline.py`. 세션 분할 macro-F1 0.523 ± 0.023, 바이트 가중 정확도 0.985. 노이즈 제외 학습 채택 (docs/step5-baseline.md)
   - 알려진 한계: email 세션 2개, 패킷 3개 이하 플로우의 정확도 낮음
 - [ ] 2단계 파이프라인 구축: docker-compose 최소 파이프라인 (Replay → Kafka → Spark → ClickHouse)
-  - 설계 초안: docs/adr/0002-pipeline-design.md (상태: 제안, 아직 구현 없음)
+  - 설계: docs/adr/0002-pipeline-design.md (상태: 채택, 아직 구현 없음)
 - [ ] 3단계 스트리밍 처리: 모델 직렬화 형식 결정, Spark 추론, 품질 검사, 멱등 적재
