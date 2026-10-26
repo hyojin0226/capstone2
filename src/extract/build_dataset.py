@@ -11,7 +11,7 @@ from pathlib import Path
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).parent))
-from labeling import is_background, label_from_filename  # noqa: E402
+from labeling import is_background, label_from_filename, noise_suspect  # noqa: E402
 
 
 def main() -> None:
@@ -26,6 +26,7 @@ def main() -> None:
 
     labels = pd.DataFrame([label_from_filename(f) for f in kept["source_file"]], index=kept.index)
     kept = pd.concat([kept, labels], axis=1)
+    kept["label_noise_suspect"] = noise_suspect(kept)
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
     kept.to_parquet(args.out, index=False)
@@ -47,8 +48,10 @@ def main() -> None:
     dist = kept.groupby("service_class").agg(
         flows=("id", "size"), pcaps=("source_file", "nunique"), sessions=("session_id", "nunique"),
         bytes_mb=("bidirectional_bytes", lambda s: s.sum() / 1e6),
+        noise_suspect=("label_noise_suspect", "sum"),
     )
     dist["flow_share"] = dist["flows"] / dist["flows"].sum()
+    dist["clean_flows"] = dist["flows"] - dist["noise_suspect"]
     print(dist.round(3).to_string())
 
 

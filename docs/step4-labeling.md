@@ -72,7 +72,48 @@ a는 train, b는 test로 가면 같은 대화가 양쪽에 들어가 성능이 �
 | email | 510 | 32.6% | 4 | 2 | 2.4 MB |
 | voip | 889 | 56.8% | 10 | 6 | 895.2 MB |
 
-**문제: 이대로는 baseline 평가가 불안정하다.**
-- email은 세션이 2개뿐이다. 세션 단위로 나누면 test에 1개, train에 1개가 들어간다.
-- 클래스가 3개뿐이라 "서비스 유형별 모니터링" 시나리오(스트리밍, 파일전송 등)를 보여주지 못한다.
-- NonVPN-PCAPs-02/03 (필요하면 VPN-PCAPs)을 추가로 받아야 한다.
+이대로는 클래스 3개, email 세션 2개라 baseline 평가가 불안정했다. → 5절에서 NonVPN-PCAPs-02/03을 추가했다.
+
+## 5. 확장: NonVPN-PCAPs-02, 03 추가
+
+- 입력: PCAP 86개 (24 GB). 추출 125초 (가장 큰 ftps_down_1a 5.8 GB는 45초).
+- 압축이 **Deflate64**(zip compression method 9)라서 Python `zipfile`과 Windows `tar`로는 풀리지 않았다.
+  WSL에 `unzip`(Info-ZIP 6.0, `USE_DEFLATE64`)을 설치해서 풀었다.
+- 파일명 109개 전부에 라벨 규칙이 맞는지 검사했다 (매칭 실패 0).
+- a/b 쌍은 23쌍이다. `hangout_chat_4b` / `hangouts_chat_4a`는 원본 철자가 달라서 `session_id`를 만들 때 이름을 맞춘다.
+- 영상통화(hangouts_video, skype_video)는 facebook_video와 같은 기준으로 voip(video_call)에 넣는다.
+
+### 클래스 분포 (PCAP 109개, F2 적용 후)
+
+| service_class | 플로우 | PCAP | 세션 | 바이트 | 노이즈 의심 | 의심 제외 시 |
+|---|---|---|---|---|---|---|
+| chat | 652 | 20 | 15 | 24.9 MB | 76 | 576 |
+| email | 510 | 4 | 2 | 2.4 MB | 4 | 506 |
+| file_transfer | 2,671 | 32 | 28 | 13,898.6 MB | 1,793 | 878 |
+| streaming | 1,179 | 19 | 19 | 1,632.5 MB | 38 | 1,141 |
+| voip | 3,746 | 34 | 22 | 4,442.6 MB | 1,486 | 2,260 |
+
+전체 364,054 플로우 중 8,758개(2.4%)가 남고, 바이트는 99.5%가 남는다.
+
+### 라벨 노이즈: 캡처 PC의 백그라운드 트래픽
+
+F2를 통과해도 라벨과 무관한 플로우가 많이 남는다.
+- **BitTorrent:** voipbuster1b/2b/3b, ftps_down_1a, ftps_up_2a에서 1,565개. 거의 전부 한 호스트(131.202.240.87)에서 나왔고 바이트 비중은 ~0%.
+  캡처하던 PC에서 토렌트 클라이언트가 돌고 있었던 것으로 보인다.
+- **scp1.pcapng:** 남은 1,159개 중 HTTP(80번 포트) 1,048개, HTTP.MpegDash 48개. SCP와 무관한 브라우저 영상 트래픽이다.
+- **voip:** HTTP.WindowsUpdate 132개. voip 클래스 바이트의 17.1%가 이런 의심 플로우다.
+
+**처리:** 삭제하지 않고 `label_noise_suspect` 플래그만 단다 (`src/extract/labeling.py`의 `noise_suspect`).
+- nDPI가 무관한 서비스로 판별한 플로우 (BitTorrent, WindowsUpdate, OCSP, SMB, NetBIOS 등)
+- streaming이 아닌 클래스의 평문 HTTP (넷플릭스 등 streaming은 HTTP로 영상을 보내므로 정상)
+
+nDPI 결과는 이 플래그에만 쓰고 모델 피처로는 쓰지 않는다. 의심 플로우를 학습에서 뺄지는 5단계에서 포함/제외를 비교해 정한다.
+
+### 남은 한계
+- **email은 세션 2개뿐이다** (ISCX NonVPN에 email PCAP이 이것밖에 없다). 세션 단위로 나누면 email은 train 1개, test 1개다.
+  5단계에서 email 성능은 "참고"로만 보고, 세션 단위 교차검증(GroupKFold)으로 분산을 함께 보고한다.
+- 노이즈 플래그 규칙은 nDPI 판별에 기대므로, nDPI가 `TLS`나 `Unknown`으로만 보는 백그라운드 트래픽은 걸러지지 않는다.
+
+### 원본 파일 위치
+- `data/raw/nonvpn-01/`, `nonvpn-02/`, `nonvpn-03/` (압축 해제한 PCAP, 약 25 GB)
+- zip 01은 `data/raw/_archives/`에 복사해 두었다. 02/03(약 23 GB)은 디스크 중복을 피하려고 Windows Downloads에만 둔다.
