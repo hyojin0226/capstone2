@@ -176,6 +176,49 @@ XGBoost는 "새 버전이 옛 모델을 읽는 것"만 보장하고, 반대 방�
 - **모델을 바꿔 다시 처리할 때:** 새 모델로 같은 데이터를 다시 재생하면, 새 예측 행의 version이 더 크므로 그 행이 남는다.
   옛 예측과 비교가 필요하면 `model_version`별 결과를 별도 테이블로 남기는 것을 그때 검토한다 (지금은 하지 않는다).
 
+## 결정 6. held-out 세션과 실시간 정확도 원칙 (2026-10-27 추가)
+
+**문제:** 처음 운영 모델(`xgb-20261027-289d0474`)은 `flows_labeled` 전체로 학습했다. 그런데 replay도 같은 데이터를 보낸다.
+그래서 실시간 예측은 모델이 학습한 플로우에 대한 예측(in-sample)이고, 이것으로 계산한 정확도는 실제 성능이 아니다.
+
+**원칙: 실시간 정확도는 held-out 세션에서만 계산한다.**
+- 운영 모델 학습에서 클래스마다 1개 이상의 세션을 뺀다 (`src/model/holdout.json`).
+- held-out 세션 목록과 오프라인 held-out 평가를 `metadata.json`의 `holdout`에 기록한다.
+- 실시간 정확도 = held-out 세션의 `inferred AND NOT label_noise_suspect AND fault_type = ''` 행만으로 계산한다.
+  - ClickHouse: `model_holdout_sessions`(모델별 목록, `register_holdout.py`로 등록), `holdout_eval_rows`, `realtime_holdout_accuracy` 뷰.
+- held-out이 아닌 세션의 예측은 대시보드에서 "트래픽 양" 집계에는 쓰지만, 정확도 지표에는 쓰지 않는다.
+
+**선택 규칙**
+- 클래스마다 clean 플로우의 약 15–25%를 뺀다. 1개 이상 세션.
+- 가능한 여러 앱에 걸쳐 고른다. 가장 큰 세션과 노이즈가 많은 세션(scp1)은 피한다.
+- a/b 쌍은 `session_id` 단위라 함께 빠진다.
+
+| 클래스 | held-out 세션 | clean 행 |
+|---|---|---|
+| chat | facebook_chat_4, gmailchat3, icqchat1 | 130 / 576 |
+| email | email1 | 68 / 506 |
+| file_transfer | ftps_up_2, skype_file2, sftp_up_2, scpdown1 | 180 / 878 |
+| streaming | netflix2, vimeo4, youtube1, spotify4 | 255 / 1,141 |
+| voip | facebook_audio2, hangouts_video2, hangouts_audio3, voipbuster_4, skype_audio4 | 470 / 2,260 |
+
+**email (세션 2개뿐):** 아래 대안 중 A를 승인받았다.
+
+| 대안 | 판단 |
+|---|---|
+| **A. email1(68행) held-out, email2(438행)로 학습 (채택)** | 모든 클래스에 held-out이 생긴다. email 학습 데이터의 87%를 유지한다. 실시간 email 정확도는 세션 1개·68행 기반이라 "표본 작음"을 함께 표시한다 |
+| B. email2 held-out, email1로 학습 | 학습 데이터가 68행뿐이다 |
+| C. email은 held-out 없이 학습, 실시간 정확도에서 제외 | email 성능을 실시간으로 볼 수 없다 |
+| D. 세션 안에서 시간으로 나누기 | 같은 세션이 학습·평가에 함께 들어가는 누수라 제외 |
+
+**결과 (`xgb-20261027-1cc0f57c`, 학습 4,258행 / held-out 1,103행)**
+- 오프라인 held-out: accuracy 0.746, macro-F1 0.701.
+- 실시간 `realtime_holdout_accuracy`가 이 값과 클래스별 support / correct / predicted까지 정확히 같다.
+- 같은 모델의 in-sample(학습 세션) 정확도는 0.950이다. 전체로 계산했다면 약 0.2 부풀려졌을 것이다.
+- **해석 주의:** held-out 세션은 무작위가 아니라 규칙으로 골랐다 (중간 크기, 노이즈 적은 세션). 그래서 held-out 수치(0.70)는 세션 CV(0.52 ± 0.02, 5-fold, 모든 세션이 한 번씩 평가됨)보다 높게 나왔다.
+  - 일반화 성능 추정은 세션 CV가 더 보수적이다.
+  - held-out 수치는 "실시간 정확도를 대조하는 고정 기준"으로 쓴다.
+- 이 모델은 세션 CV를 기록하지 않는다. 학습 세션 중 email이 하나뿐이라, email이 학습에 없는 fold가 생기기 때문이다 (`metadata.training.cv_note`).
+
 ## 검증 계획 (3단계 완료 기준)
 
 | 항목 | 기준 |
@@ -201,6 +244,7 @@ XGBoost는 "새 버전이 옛 모델을 읽는 것"만 보장하고, 반대 방�
 | 회계 | 367,755 = flows_raw 365,965 + flows_rejected 1,790 = Kafka offset 합계 |
 | 멱등 | 추론·품질 컬럼 + 오류 주입 상태의 장애 테스트: 실제로 쓰인 중복 13,943행(part_log), FINAL·OPTIMIZE 후 세 테이블 모두 수렴, 손실 0 |
 | 지연 | E2E p50 4.6 → 5.1(추론) → 6.2 s(추론 + 품질). 배치 평균 1.0 → 2.68 s. Spark 메모리 3.54 / 4 GiB (5단계 개선 대상) |
+| held-out 정확도 (결정 6) | held-out 모델로 바꾼 뒤 전체 재검증 14/14 통과. 실시간 held-out 정확도 = 오프라인 held-out 평가 (5개 클래스 모두 일치) |
 
 **측정 방법 보완:** 중복은 `count() − uniqExact`만으로 세지 않는다. 백그라운드 merge가 측정 전에 중복을 합칠 수 있기 때문이다.
 실제로 쓰인 중복은 `system.part_log`의 NewPart 행 합계 − 고유 키 수로 센다.

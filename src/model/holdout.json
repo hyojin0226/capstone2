@@ -1,0 +1,13 @@
+{
+  "description": "운영 모델 학습에서 빼는 held-out 세션. 실시간 정확도는 이 세션에서만 계산한다 (ADR 0003 결정 6)",
+  "rule": "클래스마다 clean 플로우(F2 통과 AND NOT noise_suspect)의 약 15-25%, 1개 이상 세션, 가능한 여러 앱, 가장 큰 세션과 노이즈가 많은 세션(scp1)은 피한다. a/b 쌍은 session_id 단위라 함께 빠진다",
+  "decided": "2026-10-27",
+  "email_note": "email은 세션이 2개뿐이다. A안 승인: email1(clean 68)을 held-out, email2(438)로 학습. 실시간 email 정확도는 세션 1개 기반이라 표본이 작다고 함께 표시한다",
+  "sessions": {
+    "chat": ["facebook_chat_4", "gmailchat3", "icqchat1"],
+    "email": ["email1"],
+    "file_transfer": ["ftps_up_2", "skype_file2", "sftp_up_2", "scpdown1"],
+    "streaming": ["netflix2", "vimeo4", "youtube1", "spotify4"],
+    "voip": ["facebook_audio2", "hangouts_video2", "hangouts_audio3", "voipbuster_4", "skype_audio4"]
+  }
+}

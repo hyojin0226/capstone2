@@ -134,6 +134,21 @@ docker exec clickhouse clickhouse-client --user capstone --password capstone-dev
 
 `004`는 `flows_raw`에 품질 컬럼을 추가하고 `flows_rejected`, `pipeline_batches`를 만든다. 새로 시작할 때도 `001` 다음에 `004`를 실행해야 두 테이블이 생긴다.
 
+```bash
+docker exec clickhouse clickhouse-client --user capstone --password capstone-dev --queries-file /schema/005_holdout_accuracy.sql
+```
+
+`005`는 held-out 세션 목록 테이블과 실시간 정확도 뷰(`realtime_holdout_accuracy`)를 만든다 (ADR 0003 결정 6).
+**실시간 정확도는 held-out 세션에서만 계산한다.** 모델을 바꾸면 그 모델의 held-out 목록을 등록한다 (WSL venv):
+
+```bash
+python src/model/register_holdout.py --model-dir models/xgb-20261027-1cc0f57c
+```
+
+```bash
+docker exec clickhouse clickhouse-client --user capstone --password capstone-dev -q "SELECT * FROM capstone.realtime_holdout_accuracy"
+```
+
 중복 확인 쿼리 (장애 테스트용, ADR 0002 결정 5):
 
 ```bash
@@ -144,7 +159,8 @@ docker exec clickhouse clickhouse-client --user capstone --password capstone-dev
 
 `flows.raw` → F2 표시 → F2 통과 행 추론 → `capstone.flows_raw`. 코드는 `src/`를 읽기 전용으로 마운트해서 쓰므로, 코드를 고친 뒤에는 컨테이너만 다시 시작하면 된다.
 
-모델은 `models/<version>`을 읽기 전용으로 마운트해서 쓴다 (`python src/model/export_model.py`로 만든다). 기본값은 compose의 `MODEL_VERSION`이다. 다른 모델을 쓰려면:
+모델은 `models/<version>`을 읽기 전용으로 마운트해서 쓴다 (`python src/model/export_model.py`로 만든다).
+기본값은 compose의 `MODEL_VERSION`(현재 `xgb-20261027-1cc0f57c`, held-out 세션 제외 학습)이다. 다른 모델을 쓰려면:
 
 ```bash
 MODEL_VERSION=<version> docker compose -f infra/docker-compose.yml up -d spark

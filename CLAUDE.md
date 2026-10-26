@@ -67,10 +67,10 @@ docs/              # 설계 결정 기록(ADR), 성능 실험 결과
     - F2는 지우지 않고 `f2_passed`로 표시. 체크포인트 `/checkpoints/flows_raw`(볼륨 `spark-checkpoints`). 추론 없음
     - 전체 364,054건 100배속: 전송 = Kafka offset 합계 = ClickHouse 행 수, 중복 0, F2 불일치 0 (docs/step2-pipeline.md 6절)
   - [x] 2단계 장애 테스트 (`infra/scripts/failure_test.sh`): 쓰기 도중 SIGKILL → 중복 18,684 (= 커밋 안 된 배치 1개), FINAL·OPTIMIZE로 364,054 수렴, 손실 0 (docs/step2-pipeline.md 7절)
-- [ ] 3단계 스트리밍 처리: 모델 직렬화 형식 결정, Spark 추론, 품질 검사, 멱등 적재
+- [x] 3단계 스트리밍 처리: 모델 직렬화 형식 결정, Spark 추론, 품질 검사, 멱등 적재
   - 설계: docs/adr/0003-inference-and-quality.md (상태: 채택). 구현 기록: docs/step3-streaming.md
   - [x] 런타임 맞추기: 학습·Spark 모두 xgboost-cpu 3.2.0 (Spark 이미지 Python 3.10). baseline 재학습 0.521 ± 0.022
-  - [x] 모델 직렬화: `src/model/export_model.py` → `models/xgb-20261027-289d0474/` (model.json + metadata.json, git 제외)
+  - [x] 모델 직렬화: `src/model/export_model.py` → `models/<version>/` (model.json + metadata.json, git 제외)
   - [x] 환경 간 예측 일치: WSL ↔ Spark 이미지 8,758건 불일치 0, 확률 차이 0.0 (`src/model/predict_file.py`)
   - [x] Spark 추론 (`src/streaming/inference.py`, mapInPandas). 대상 = f2_passed AND quality_ok
     - 오프라인 예측과 8,758건 클래스·확률 불일치 0 (docs/step3-streaming.md 5절)
@@ -79,4 +79,9 @@ docs/              # 설계 결정 기록(ADR), 성능 실험 결과
   - [x] replay 오류 주입 (`--inject-faults`, `src/replay/faults.py`): Kafka 헤더 x-fault → fault_type 컬럼
   - [x] **ADR 0003 완료 기준 전부 통과** (`infra/scripts/verify_step3.py` 13/13, 누수 테스트 3/3, 장애 테스트 FINAL 수렴·손실 0) — docs/step3-streaming.md 8–10절
     - 알려진 위험: Spark 메모리 3.54 / 4 GiB (persist한 raw_value). 5단계 첫 개선 대상
-  - [ ] held-out 세션으로 운영 모델 재학습 (실시간 예측이 in-sample인 문제). email 처리 방식 제안 후 승인 대기
+  - [x] held-out 세션으로 운영 모델 재학습 (ADR 0003 결정 6): **운영 모델 `xgb-20261027-1cc0f57c`** (compose 기본값)
+    - held-out 17개 세션 (`src/model/holdout.json`, email은 email1). 학습 4,258행 / held-out 1,103행
+    - **원칙: 실시간 정확도는 held-out 세션에서만 계산** → ClickHouse `realtime_holdout_accuracy` 뷰 (`register_holdout.py`로 목록 등록)
+    - 실시간 held-out = 오프라인 held-out 평가 (accuracy 0.746, macro-F1 0.701, 클래스별 일치). in-sample은 0.950이라 전체로 재면 약 0.2 부풀려짐
+    - held-out 세션은 규칙으로 골라 세션 CV(0.52)보다 높게 나온다. 일반화 추정은 세션 CV가 더 보수적
+    - 새 모델로 `verify_step3.py` 14/14, 누수 테스트 3/3 (docs/step3-streaming.md 11절)

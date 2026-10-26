@@ -96,7 +96,7 @@ services:
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-capstone-dev}
       PYTHONDONTWRITEBYTECODE: "1"       # 코드 마운트가 읽기 전용이라 .pyc를 만들지 않는다
       PYTHONPATH: /opt/app/src/streaming:/opt/app/src/extract   # mapInPandas 함수를 Python worker에서도 import하기 위해
-      MODEL_DIR: /opt/app/models/${MODEL_VERSION:-xgb-20261027-289d0474}   # ADR 0003 결정 1
+      MODEL_DIR: /opt/app/models/${MODEL_VERSION:-xgb-20261027-1cc0f57c}   # ADR 0003 결정 1, 6 (held-out 세션 제외 학습)
     volumes:
       - ../src:/opt/app/src:ro
       - ../models:/opt/app/models:ro

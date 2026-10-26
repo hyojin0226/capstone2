@@ -11,7 +11,7 @@
 | 품질 검사 (flows_rejected, quality_flags, pipeline_batches) | 완료 (아래 6) |
 | replay 오류 주입 (`--inject-faults`) | 완료 (아래 7) |
 | ADR 0003 완료 기준 검증 | **전부 통과** (아래 8–10) |
-| held-out 세션으로 운영 모델 재학습 | 제안 단계 (아래 11) |
+| held-out 세션으로 운영 모델 재학습, 실시간 held-out 정확도 | 완료 (아래 11) |
 
 ## 1. 학습·추론 런타임 맞추기 (2026-10-27)
 
@@ -342,3 +342,70 @@ python infra/scripts/verify_step3.py --replay-log /tmp/failure_test_replay.log
   - `maxOffsetsPerTrigger` 조정
   - 컨테이너 메모리 재배분
 - E2E의 대부분은 여전히 트리거 대기(5초)와 시작 구간의 밀린 데이터다. 튜닝은 5단계에서 같은 조건으로 전후 비교한다.
+
+## 11. held-out 세션으로 운영 모델 재학습 (2026-10-27, ADR 0003 결정 6)
+
+**문제:** 처음 운영 모델(`xgb-20261027-289d0474`)은 `flows_labeled` 전체로 학습했다. replay도 같은 데이터를 보내므로, 실시간 예측이 in-sample이었다.
+
+**처리 (A안 승인)**
+- `src/model/holdout.json`: 클래스마다 clean 플로우의 약 15–25% 세션을 held-out으로 정했다. 모두 17개 세션이다.
+  - email은 email1(68행)을 held-out으로 빼고, email2(438행)로 학습한다.
+- `export_model.py`: held-out 세션을 학습에서 빼고, 저장한 모델 파일로 held-out을 평가한다.
+  `metadata.json`의 `holdout`에 세션 목록, 세션별 행 수, 평가 규칙, 오프라인 평가(클래스별 support / correct / predicted / P / R / F1, 혼동 행렬)를 기록한다.
+- 세션 CV는 이 모델에서 생략했다. 학습 세션 중 email이 email2 하나뿐이라, email이 학습에 없는 fold가 생긴다. 이유는 `metadata.training.cv_note`에 남겼다.
+- ClickHouse (`005_holdout_accuracy.sql`):
+  - `model_holdout_sessions`: 모델별 held-out 목록. `src/model/register_holdout.py`가 metadata에서 등록한다. 다시 실행해도 된다.
+  - `holdout_eval_rows`: held-out 세션 AND `inferred` AND NOT `label_noise_suspect` AND 정상 데이터
+  - `realtime_holdout_accuracy`: 모델·클래스별 support / correct / predicted / precision / recall / f1
+- compose 기본 모델을 `xgb-20261027-1cc0f57c`로 바꿨다. 이전 모델은 `models/`에 남아 있다 (git 제외).
+
+```
+clean rows 5,361 → train 4,258 / held-out 1,103 (17 sessions)
+saved: models/xgb-20261027-1cc0f57c/  model.json 5.1 MB
+held-out: rows 1,103 accuracy 0.7461 macro-F1 0.7014
+  chat           support  130  correct   98  precision 0.503  recall 0.754  f1 0.603
+  email          support   68  correct   32  precision 0.627  recall 0.471  f1 0.538
+  file_transfer  support  180  correct  131  precision 0.740  recall 0.728  f1 0.734
+  streaming      support  255  correct  232  precision 0.853  recall 0.910  f1 0.880
+  voip           support  470  correct  330  precision 0.809  recall 0.702  f1 0.752
+```
+
+### 검증
+
+`reset_pipeline.sh` → 전체 364,054건 + 오류 주입 1% (100배속, run_id `holdout-model-x100`) → `register_holdout.py` → `verify_step3.py`
+
+| 확인 | 결과 |
+|---|---|
+| 3단계 완료 기준 (8절 13개 항목) | 새 모델로 13/13 통과 (예측 일치 8,758건, 확률 차이 0.0 포함) |
+| **실시간 held-out 정확도 = 오프라인 held-out 평가** (14번째 항목) | **5개 클래스 모두 support / correct / predicted 일치** (1,103행, accuracy 0.7461, macro-F1 0.7014) |
+| 누수 방지 (새 모델) | 3/3 |
+
+`realtime_holdout_accuracy`:
+
+| 클래스 | support | correct | predicted | precision | recall | f1 |
+|---|---|---|---|---|---|---|
+| chat | 130 | 98 | 195 | 0.503 | 0.754 | 0.603 |
+| email | 68 | 32 | 51 | 0.627 | 0.471 | 0.538 |
+| file_transfer | 180 | 131 | 177 | 0.740 | 0.728 | 0.734 |
+| streaming | 255 | 232 | 272 | 0.853 | 0.910 | 0.880 |
+| voip | 470 | 330 | 408 | 0.809 | 0.702 | 0.752 |
+
+email은 세션 1개, 68행 기반이라 표본이 작다.
+
+### in-sample 문제의 크기
+
+같은 모델, 같은 실시간 데이터에서:
+
+| 세션 | 행 | accuracy |
+|---|---|---|
+| held-out | 1,103 | 0.746 |
+| in-sample (학습에 쓴 세션) | 4,258 | 0.950 |
+
+held-out 없이 전체로 계산했다면 실시간 정확도가 약 0.2 부풀려졌을 것이다.
+
+### 해석 주의
+
+held-out 세션은 무작위가 아니라 규칙으로 골랐다 (중간 크기, 노이즈 적은 세션).
+그래서 held-out macro-F1(0.70)이 세션 CV(0.52 ± 0.02)보다 높다.
+- 일반화 성능 추정은 모든 세션을 한 번씩 평가하는 세션 CV가 더 보수적이다.
+- held-out 수치는 실시간 정확도를 대조하는 고정 기준으로 쓴다.

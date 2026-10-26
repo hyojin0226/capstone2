@@ -53,8 +53,16 @@ def check(name: str, ok: bool, detail: str) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--replay-log", type=Path, required=True)
-    parser.add_argument("--model-dir", type=Path, default=Path("models/xgb-20261027-289d0474"))
+    parser.add_argument("--model-dir", type=Path, default=None,
+                        help="기본: MODEL_VERSION 환경 변수, 없으면 created_at이 가장 최근인 models/<version>")
     args = parser.parse_args()
+    if args.model_dir is None:
+        if os.environ.get("MODEL_VERSION"):
+            args.model_dir = Path("models") / os.environ["MODEL_VERSION"]
+        else:
+            args.model_dir = max(Path("models").glob("*/metadata.json"),
+                                 key=lambda p: json.loads(p.read_text())["created_at"]).parent
+    print(f"model: {args.model_dir}")
 
     log = args.replay_log.read_text()
     sent = int(re.search(r"delivered ([\d,]+)", log).group(1).replace(",", ""))
@@ -136,6 +144,21 @@ def main() -> None:
                   j=sum(injected.values()))
     check("pipeline_batches totals = table counts", all(int(b[k]) == v for k, v in expect.items()),
           f"batches {dict((k, int(b[k])) for k in expect)} vs tables {expect}")
+
+    # 7. 실시간 held-out 정확도 = 오프라인 held-out 평가 (ADR 0003 결정 6)
+    offline = meta.get("holdout", {}).get("offline_eval")
+    if offline is None:
+        print("[SKIP] held-out accuracy: this model has no held-out sessions in metadata")
+    else:
+        rt = ch(f"SELECT service_class, support, correct, predicted FROM capstone.realtime_holdout_accuracy "
+                f"WHERE model_version = '{meta['model_version']}'").set_index("service_class")
+        diffs = [c for c, m in offline["per_class"].items()
+                 if c not in rt.index or (int(rt.loc[c, "support"]), int(rt.loc[c, "correct"]), int(rt.loc[c, "predicted"]))
+                 != (m["support"], m["correct"], m["predicted"])]
+        check("realtime held-out accuracy = offline held-out eval", len(rt) > 0 and not diffs,
+              f"classes {len(rt)}/{len(offline['per_class'])}, differing {diffs}, held-out rows {int(rt.support.sum()) if len(rt) else 0} "
+              f"(offline {offline['rows']}), offline accuracy {offline['accuracy']} macro-F1 {offline['macro_f1']}"
+              + ("" if len(rt) else " — run src/model/register_holdout.py first"))
 
     print(f"\n{sum(results)}/{len(results)} checks passed")
     sys.exit(0 if all(results) else 1)
