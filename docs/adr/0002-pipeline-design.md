@@ -203,7 +203,8 @@ flow_id는 ClickHouse 중복 제거(ReplacingMergeTree)의 키다. 그래서 같
   - ClickHouse: `sha256:6dcf2214075602b48a09c1b62c01bd0b738ee126f60f82297334e9024b960f7b`
 - compose에는 태그만 쓴다. 태그가 다시 푸시되어 내용이 바뀌었는지 의심되면 위 digest와 비교한다.
 
-**실행 엔진 (구현 중 확인):** WSL Ubuntu 안의 `docker`는 Docker Desktop이 아니라 Ubuntu에 직접 설치된 엔진이다 (서버 29.8.0, 데이터 경로 `/var/snap/docker`).
+**실행 엔진:** WSL Ubuntu에 apt로 설치한 docker-ce 29.8.1 + docker-compose-plugin v5.5.1 (ADR 0001 참고).
+처음 띄울 때는 snap docker(29.8.0)가 같은 socket을 잡고 있어서 그쪽에서 실행됐다. snap docker를 제거한 뒤 docker-ce에서 다시 띄우고 검증했다.
 WSL2 배포판은 모두 같은 VM을 쓰므로, 메모리 전제(약 16 GB)는 같다.
 
 **처음 띄웠을 때 메모리 사용 (빈 상태):** kafka 322 MiB / 2 GiB, clickhouse 144 MiB / 3 GiB.
