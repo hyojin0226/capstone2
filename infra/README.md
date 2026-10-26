@@ -118,10 +118,14 @@ docker exec clickhouse clickhouse-client --user capstone --password capstone-dev
 docker exec clickhouse clickhouse-client --user capstone --password capstone-dev -q "SELECT count() FROM system.columns WHERE database='capstone' AND table='flows_raw'"
 ```
 
-이미 만든 테이블에 Spark 잡용 컬럼(`f2_passed`, `kafka_*`)을 추가하기 (여러 번 실행해도 된다):
+이미 만든 테이블에 Spark 잡용 컬럼(`f2_passed`, `kafka_*`, 추론 컬럼)을 추가하기 (여러 번 실행해도 된다):
 
 ```bash
 docker exec clickhouse clickhouse-client --user capstone --password capstone-dev --queries-file /schema/002_quality_and_kafka_columns.sql
+```
+
+```bash
+docker exec clickhouse clickhouse-client --user capstone --password capstone-dev --queries-file /schema/003_inference_columns.sql
 ```
 
 중복 확인 쿼리 (장애 테스트용, ADR 0002 결정 5):
@@ -132,7 +136,13 @@ docker exec clickhouse clickhouse-client --user capstone --password capstone-dev
 
 ## 4. Spark 스트리밍 잡
 
-`flows.raw` → F2 표시 → `capstone.flows_raw`. 코드는 `src/`를 읽기 전용으로 마운트해서 쓰므로, 코드를 고친 뒤에는 컨테이너만 다시 시작하면 된다.
+`flows.raw` → F2 표시 → F2 통과 행 추론 → `capstone.flows_raw`. 코드는 `src/`를 읽기 전용으로 마운트해서 쓰므로, 코드를 고친 뒤에는 컨테이너만 다시 시작하면 된다.
+
+모델은 `models/<version>`을 읽기 전용으로 마운트해서 쓴다 (`python src/model/export_model.py`로 만든다). 기본값은 compose의 `MODEL_VERSION`이다. 다른 모델을 쓰려면:
+
+```bash
+MODEL_VERSION=<version> docker compose -f infra/docker-compose.yml up -d spark
+```
 
 ```bash
 docker compose -f infra/docker-compose.yml up -d --build spark
@@ -148,7 +158,13 @@ Spark UI: http://127.0.0.1:4040 (Structured Streaming 탭)
 
 ### 처음부터 다시 (토픽·테이블·체크포인트 초기화)
 
-토픽을 새로 만들면 체크포인트의 offset이 맞지 않으므로 **셋을 함께** 초기화한다.
+토픽을 새로 만들면 체크포인트의 offset이 맞지 않으므로 **셋을 함께** 초기화한다. 아래 단계를 스크립트 하나로 실행할 수 있다:
+
+```bash
+bash infra/scripts/reset_pipeline.sh
+```
+
+수동으로 하려면:
 
 ```bash
 docker compose -f infra/docker-compose.yml stop spark
