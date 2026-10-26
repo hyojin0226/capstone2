@@ -1,0 +1,22 @@
+# 데이터: PCAP, 추출 결과는 용량이 커서 git에 올리지 않는다 (CLAUDE.md 작업 원칙 8)
+data/
+*.pcap
+*.pcapng
+*.parquet
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+
+# 로컬 설정, 비밀값
+.env
+.env.*
+
+# 에디터, OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*:Zone.Identifier
