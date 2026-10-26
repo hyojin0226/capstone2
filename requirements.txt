@@ -7,3 +7,6 @@ scikit-learn==1.9.1     # PCAP 단위 분할(GroupShuffleSplit), 평가 지표
 xgboost==3.4.1          # baseline 분류 모델
 matplotlib==3.11.2      # 클래스 분포 등 탐색용 그래프
 jupyterlab==4.6.4       # notebooks/ 탐색
+
+# 파이프라인 구축 단계
+confluent-kafka==2.16.0 # replay producer (librdkafka 기반. 선택 근거: docs/step2-pipeline.md)

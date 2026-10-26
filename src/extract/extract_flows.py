@@ -10,10 +10,14 @@
 """
 
 import argparse
+import sys
 import time
 from pathlib import Path
 
 from nfstream import NFStreamer
+
+sys.path.insert(0, str(Path(__file__).parent))
+from flow_id import compute_flow_ids  # noqa: E402
 
 
 def extract(pcap_path: Path, out_dir: Path) -> Path:
@@ -25,6 +29,7 @@ def extract(pcap_path: Path, out_dir: Path) -> Path:
     )
     df = streamer.to_pandas()
     df["source_file"] = pcap_path.name
+    df.insert(0, "flow_id", compute_flow_ids(df))  # 전역 고유 ID (ADR 0002 결정 1)
 
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / f"{pcap_path.stem}.parquet"

@@ -26,6 +26,7 @@ flow_id는 ClickHouse 중복 제거(ReplacingMergeTree)의 키다. 그래서 같
 **선택:** C. `flow_id = BLAKE2b-64(source_file | src_ip | src_port | dst_ip | dst_port | protocol | bidirectional_first_seen_ms)`
 - 추출 단계(오프라인)에서 계산해 parquet에 저장한다. replay, 재처리(4단계), 모델 학습이 모두 같은 값을 쓴다.
 - 해시는 Python 표준 `hashlib.blake2b(digest_size=8)`라 새 라이브러리가 필요 없다.
+- 입력 문자열은 7개 값을 10진수/문자열 그대로 `|`로 이어 붙인 UTF-8이다 (구현: `src/extract/flow_id.py`).
 - 검증: 현재 데이터 364,054행에서 자연키 중복 0, 64비트 해시 중복 0.
   64비트에서 36만 개를 뽑을 때 충돌 확률은 약 3.6×10⁻⁹이다 (생일 문제 근사 n²/2⁶⁵).
 - **타입은 부호 있는 Int64다** (2026-10-26 구현 중 변경. 처음에는 UInt64로 적었다).
@@ -87,6 +88,10 @@ flow_id는 ClickHouse 중복 제거(ReplacingMergeTree)의 키다. 그래서 같
   옵션을 켠 모드에서는 이미 flow_id 자체가 달라서 키에 넣을 필요가 없다. 옵션을 끈 모드에서 키에 넣으면 멱등 시험이 깨진다.
 
 ## 결정 3. Kafka 메시지 스키마
+
+### 클라이언트 라이브러리
+
+replay producer는 `confluent-kafka 2.16.0`(librdkafka)을 쓴다. 후보 비교와 선택 이유: docs/step2-pipeline.md 2절.
 
 ### 직렬화 형식
 
@@ -277,5 +282,7 @@ ClickHouse 서버 메모리 상한은 `max_server_memory_usage_to_ram_ratio=0.8`
 
 1. **a/b 이중 계상.** a/b는 같은 대화를 두 지점에서 캡처한 것이다. 동시 재생하면 유형별 트래픽 양이 두 번 잡힌다.
    관측 지점이 두 곳인 네트워크로 보고 그대로 둘지, 집계할 때 `session_id`별로 한쪽만 셀지 6단계 대시보드 설계에서 정한다.
-2. **NFStream 추출의 결정성.** 채택안 C는 NFStream `id`에 의존하지 않는다. 하지만 같은 PCAP을 다시 추출했을 때 `first_seen_ms`와 5-tuple이 같게 나오는지는 4단계 재처리 전에 한 번 확인한다.
+2. ~~**NFStream 추출의 결정성.**~~ **해결 (2026-10-26).** PCAP 2개를 다시 추출해 보니 flow_id 집합이 완전히 같았다.
+   반면 NFStream `id` → 플로우 대응은 실행마다 바뀌었다 (email1a). 대안 A를 버리고 C를 고른 판단이 맞았다. 상세: docs/step2-pipeline.md 1절.
+   4단계에서 전체 PCAP을 재처리할 때 같은 검사를 전체 규모로 반복한다.
 3. **이미지·커넥터 버전 호환.** Kafka와 ClickHouse는 고정했다 (결정 4). Spark 버전, Kafka 커넥터(`spark-sql-kafka`), ClickHouse JDBC 드라이버 조합은 Spark를 추가할 때 확인하고 이 문서에 기록한다.
