@@ -1,4 +1,4 @@
-# 1주차: PCAP 한 개 NFStream 추출 결과
+# 3단계: PCAP 한 개 NFStream 추출 결과
 
 - 날짜: 2026-10-26
 - 입력: `NonVPN-PCAPs-01.zip` 중 `email1a.pcap` (3.2 MB, 약 606초 캡처)

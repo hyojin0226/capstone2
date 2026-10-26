@@ -5,8 +5,8 @@
 
 ## 결정
 1. 데이터셋은 **ISCX VPN-nonVPN**으로 시작한다.
-2. 개발은 **WSL2 Ubuntu 24.04** 안(`~/capstone2`)에서 하고, 인프라(2주차~)는 Docker Desktop(WSL2 backend)으로 띄운다.
-3. 1주차는 Docker 없이 로컬 Python venv만 쓴다.
+2. 개발은 **WSL2 Ubuntu 24.04** 안(`~/capstone2`)에서 하고, 인프라(파이프라인 구축 단계부터)는 Docker Desktop(WSL2 backend)으로 띄운다.
+3. 데이터 탐색 단계에서는 Docker 없이 로컬 Python venv만 쓴다.
 
 ## 이유
 - ISCX VPN-nonVPN의 라벨(스트리밍, 파일전송, VoIP, 채팅 등)이 "서비스 유형별 트래픽 모니터링"이라는 운영 시나리오와 바로 맞는다.
@@ -22,4 +22,4 @@
 ## 실행 환경 (확인 시점 기준)
 - Ryzen 5 5600T (6C/12T), RAM 32GB, WSL/Docker에 할당된 메모리 약 16GB (`.wslconfig` 없음, 기본값)
 - Python 3.12.3 (WSL), Docker 29.9.2, Compose v5.6.1
-- 2주차에 서비스를 여러 개 동시에 띄울 때 WSL 메모리 할당을 다시 검토한다.
+- 파이프라인 구축 단계에서 서비스를 여러 개 동시에 띄울 때 WSL 메모리 할당을 다시 검토한다.
