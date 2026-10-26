@@ -30,19 +30,19 @@ grafana/           # 대시보드 JSON, 알림 규칙
 docs/              # 설계 결정 기록(ADR), 성능 실험 결과
 ```
 
-## 일정 (12월 중순 최종발표 가정)
-1. 데이터셋 확정, NFStream 추출, 오프라인 XGBoost baseline
-2. docker-compose로 Replay → Kafka → Spark → ClickHouse 최소 파이프라인
-3. Spark 추론, 품질 검사, 멱등 적재
-4. MinIO 원본 보존, 장애 후 재처리 검증
-5. 부하 단계별 테스트, 병목 분석, 튜닝 전후 비교
-6. dbt, Grafana 대시보드, 이상 주입 알림 검증
-7. 문서화, 발표 준비 (여유 시 early classification / DL 비교)
+## 단계별 일정 (12월 중순 최종발표 가정)
+1. 데이터 탐색: 데이터셋 확정, NFStream 추출, 오프라인 XGBoost baseline
+2. 파이프라인 구축: docker-compose로 Replay → Kafka → Spark → ClickHouse 최소 파이프라인
+3. 스트리밍 처리: Spark 추론, 품질 검사, 멱등 적재
+4. 재처리: MinIO 원본 보존, 장애 후 재처리 검증
+5. 성능: 부하 단계별 테스트, 병목 분석, 튜닝 전후 비교
+6. 분석·모니터링: dbt, Grafana 대시보드, 이상 주입 알림 검증
+7. 마무리: 문서화, 발표 준비 (여유 시 early classification / DL 비교)
 
-3주차 종료 시점에 E2E로 데이터가 흐르지 않으면 확장 과제는 모두 제외한다.
+3단계(스트리밍 처리)가 끝났을 때 E2E로 데이터가 흐르지 않으면 확장 과제는 모두 제외한다.
 
 ## 작업 원칙 (Claude Code가 따를 것)
-1. 한 번에 전체를 구현하지 않는다. 현재 주차의 목표만 다룬다.
+1. 한 번에 전체를 구현하지 않는다. 현재 단계의 목표만 다룬다.
 2. 코드 작성 전에 이번 단계의 목표와 데이터 흐름을 먼저 설명한다.
 3. 새 기술/라이브러리 추가 전에 필요성과 대안을 설명하고 승인받는다.
 4. 오류는 임시방편보다 원인을 먼저 파악한다.
@@ -52,4 +52,10 @@ docs/              # 설계 결정 기록(ADR), 성능 실험 결과
 8. 대용량 PCAP/데이터 파일은 git에 커밋하지 않는다.
 
 ## 진행 현황
-- [ ] 1주차: 환경 확인, 데이터셋 다운로드, NFStream 추출, baseline
+- [x] 1단계 데이터 탐색: 환경 확인, 데이터셋 다운로드, NFStream 추출, baseline
+  - 데이터: ISCX VPN-nonVPN의 NonVPN-PCAPs-01~03 (PCAP 109개, 약 25 GB). VPN-PCAPs는 아직 쓰지 않음.
+  - 추출·라벨: `src/extract/` → `data/dataset/flows_labeled.parquet` (8,758 플로우, 5개 클래스: chat, email, file_transfer, streaming, voip)
+  - 라벨 규칙: 배경 트래픽 필터 F2, a/b 쌍을 묶는 `session_id`, `label_noise_suspect` 플래그 (docs/step4-labeling.md)
+  - baseline: `src/model/train_baseline.py`. 세션 분할 macro-F1 0.523 ± 0.023, 바이트 가중 정확도 0.985. 노이즈 제외 학습 채택 (docs/step5-baseline.md)
+  - 알려진 한계: email 세션 2개, 패킷 3개 이하 플로우의 정확도 낮음
+- [ ] 2단계 파이프라인 구축: 모델 직렬화 형식 결정, docker-compose 최소 파이프라인
