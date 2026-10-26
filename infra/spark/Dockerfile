@@ -23,7 +23,13 @@ ADD --chmod=644 --checksum=sha256:5273c8bc8c0dca2211175c0d27efbd7228efae99689aac
 ADD --chmod=644 --checksum=sha256:d83736e24306e11929b0cf81b3306ae903c6f51c735c509ad5680c88640d99ce \
     ${MAVEN}/com/clickhouse/clickhouse-jdbc/0.10.0/clickhouse-jdbc-0.10.0-all.jar /opt/spark/jars/
 
-# 체크포인트 디렉터리. named volume을 처음 붙일 때 이 소유권(spark, uid 185)이 복사된다
 USER root
+
+# 추론용 Python 패키지 (xgboost-cpu, pandas, pyarrow 등). 모든 파일을 sha256으로 고정한다. ADR 0003 결정 2
+COPY requirements-spark.txt /tmp/requirements-spark.txt
+RUN python3 -m pip install --no-cache-dir --require-hashes --only-binary=:all: -r /tmp/requirements-spark.txt \
+    && rm /tmp/requirements-spark.txt
+
+# 체크포인트 디렉터리. named volume을 처음 붙일 때 이 소유권(spark, uid 185)이 복사된다
 RUN mkdir -p /checkpoints && chown spark:spark /checkpoints
 USER spark

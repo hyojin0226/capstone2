@@ -68,5 +68,9 @@ docs/              # 설계 결정 기록(ADR), 성능 실험 결과
     - 전체 364,054건 100배속: 전송 = Kafka offset 합계 = ClickHouse 행 수, 중복 0, F2 불일치 0 (docs/step2-pipeline.md 6절)
   - [x] 2단계 장애 테스트 (`infra/scripts/failure_test.sh`): 쓰기 도중 SIGKILL → 중복 18,684 (= 커밋 안 된 배치 1개), FINAL·OPTIMIZE로 364,054 수렴, 손실 0 (docs/step2-pipeline.md 7절)
 - [ ] 3단계 스트리밍 처리: 모델 직렬화 형식 결정, Spark 추론, 품질 검사, 멱등 적재
-  - 설계 초안: docs/adr/0003-inference-and-quality.md (상태: 제안, 아직 구현 없음)
-  - 확인한 제약: Spark 이미지 Python 3.10 vs 학습 xgboost 3.4.1(Python ≥3.12) → 버전 맞추기 결정 필요 (ADR 0003 결정 2)
+  - 설계: docs/adr/0003-inference-and-quality.md (상태: 채택). 구현 기록: docs/step3-streaming.md
+  - [x] 런타임 맞추기: 학습·Spark 모두 xgboost-cpu 3.2.0 (Spark 이미지 Python 3.10). baseline 재학습 0.521 ± 0.022
+  - [x] 모델 직렬화: `src/model/export_model.py` → `models/xgb-20261027-289d0474/` (model.json + metadata.json, git 제외)
+  - [x] 환경 간 예측 일치: WSL ↔ Spark 이미지 8,758건 불일치 0, 확률 차이 0.0 (`src/model/predict_file.py`)
+  - [ ] Spark 추론 (mapInPandas, f2_passed AND quality_ok 행만)
+  - [ ] 품질 검사 (flows_rejected, quality_flags, pipeline_batches) + replay 오류 주입 검증

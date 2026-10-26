@@ -4,7 +4,7 @@ nfstream==6.6.0         # PCAP → 플로우 레코드 + 통계 피처 추출
 pandas==3.1.0           # 플로우 테이블 다루기
 pyarrow==26.0.0         # parquet 읽기/쓰기 (data/flows/)
 scikit-learn==1.9.1     # PCAP 단위 분할(GroupShuffleSplit), 평가 지표
-xgboost==3.4.1          # baseline 분류 모델
+xgboost-cpu==3.2.0      # 분류 모델. Spark 이미지(Python 3.10)와 같은 버전으로 고정 (ADR 0003 결정 2). GPU 의존성 없는 배포본
 matplotlib==3.11.2      # 클래스 분포 등 탐색용 그래프
 jupyterlab==4.6.4       # notebooks/ 탐색
 

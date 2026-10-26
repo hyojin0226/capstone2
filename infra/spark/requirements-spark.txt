@@ -1,0 +1,18 @@
+# Spark 이미지(Python 3.10)에 설치하는 추론용 패키지. 근거: docs/adr/0003-inference-and-quality.md 결정 2
+# pip install --require-hashes --only-binary=:all: 로 설치한다 (해시가 다르면 설치 실패).
+# 각 패키지는 Python 3.10용 wheel이 있는 최신 버전이다 (2026-10-27 확인). 하위 의존성까지 모두 고정한다.
+
+# 추론: 학습 venv와 같은 버전이어야 한다
+xgboost-cpu==3.2.0 --hash=sha256:9c10b1653e1a689bf4094a328144cf3633c9be0e5217a76fbdc2fde6abcb2950
+numpy==2.2.6 --hash=sha256:fc7b73d02efb0e18c000e9ad8b83480dfcd5dfd11065997ed4c6747470ae8915
+scipy==1.15.3 --hash=sha256:9e2abc762b0811e09a0d3258abee2d98e0c703eee49464ce0069590846f31d40
+
+# pandas UDF (mapInPandas). PySpark 4.1 최소 요구: pandas 2.2.0, pyarrow 15.0.0
+pandas==2.3.3 --hash=sha256:dd7478f1463441ae4ca7308a70e90b33470fa593429f9d4c578dd00d1fa78838
+pyarrow==25.0.1 --hash=sha256:a4d6d5e9a3d1879a97c08ded0c797579b7965eafd0f0c26c30b45ccc06db939b
+
+# pandas 의존성. python-dateutil 3.0.0은 확인 시점에 공개 6일째인 메이저 버전이라 2.9.0.post0으로 고정
+python-dateutil==2.9.0.post0 --hash=sha256:a8b2bc7bffae282281c8140a97d3aa9c14da0b136dfe83f850eea9a5f7470427
+six==1.17.0 --hash=sha256:4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274
+pytz==2026.5 --hash=sha256:e658af3757f9e26a9d25dd2aff38335acd92bc9104f890a894b2c1ba28311b03
+tzdata==2026.5 --hash=sha256:b683bd1b6659ddcd810ff02ad09ba821d4bf1065072805063eb35c49617905ac
