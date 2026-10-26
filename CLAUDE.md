@@ -85,3 +85,8 @@ docs/              # 설계 결정 기록(ADR), 성능 실험 결과
     - 실시간 held-out = 오프라인 held-out 평가 (accuracy 0.746, macro-F1 0.701, 클래스별 일치). in-sample은 0.950이라 전체로 재면 약 0.2 부풀려짐
     - held-out 세션은 규칙으로 골라 세션 CV(0.52)보다 높게 나온다. 일반화 추정은 세션 CV가 더 보수적
     - 새 모델로 `verify_step3.py` 14/14, 누수 테스트 3/3 (docs/step3-streaming.md 11절)
+- [ ] 4단계 원본 보존·재처리 (설계 승인 대기, 아직 구현 없음)
+  - ADR 0004 시간 윈도우 집계 (상태: 제안): 중복 제거된 flows_raw 위 ClickHouse 조회 시점 집계 + dbt 권장.
+    **승인되면 위 "확정된 설계 결정"의 "Spark는 … 시간 윈도우 집계" 문구를 고친다**
+  - ADR 0005 원본 보존과 재처리 (상태: 제안): Spark 두 번째 스트리밍 쿼리(file sink) → MinIO Parquet, 재처리는 보존본 → Spark 배치 잡.
+    시나리오 ① Kafka 소실 후 복구, ② 새 모델 재추론. 성공 기준은 ADR에 수치로 정의
