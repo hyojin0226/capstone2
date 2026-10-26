@@ -21,3 +21,6 @@ __pycache__/
 .DS_Store
 Thumbs.db
 *:Zone.Identifier
+
+# 모델 산출물 (ADR 0003 결정 1). 4단계에서 MinIO에 보존
+models/
