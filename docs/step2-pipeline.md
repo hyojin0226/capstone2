@@ -8,6 +8,7 @@
 | flow_id (추출 단계) | 완료 (아래 1) |
 | replay producer | 완료 (아래 2, 3, 4) |
 | Spark Structured Streaming → ClickHouse (F2 표시, 추론 없음) | 완료 (아래 5, 6) |
+| 장애 테스트 (Spark 강제 종료 → 재시작, 중복 수렴) | 완료 (아래 7) |
 
 ## 1. flow_id 추가 (2026-10-26)
 
@@ -270,8 +271,81 @@ Spark의 F2 구현은 전체 데이터에서 오프라인 규칙과 한 건도 �
 - E2E의 대부분은 **5초 트리거 대기**다. 배치 처리 자체는 약 1초다. 트리거 간격과 지연의 관계는 5단계에서 실험한다.
 - 측정 범위는 수집기 출력 이후 파이프라인 구간이다 (NFStream idle timeout 제외, ADR 0002).
 
+## 7. 장애 테스트: replay 중 Spark 강제 종료 (2026-10-26)
+
+**목적:** Spark가 장애 후 배치를 다시 실행하면 중복이 생긴다(at-least-once). 그 중복이 flow_id 기준으로 수렴하는지, 손실은 없는지 확인한다.
+ADR 0002 결정 5 "검증"의 방법을 따른다. exactly-once는 주장하지 않는다.
+
+### 방법 (`infra/scripts/failure_test.sh 50 100000 15`)
+
+1. 토픽, 테이블, 체크포인트를 초기화하고 Spark를 시작한다.
+2. replay를 50배속으로 시작한다 (전체 364,054건, 약 118초).
+3. 10만 행이 쌓인 뒤, ClickHouse 행 수가 늘어나는 순간(= Spark가 배치를 쓰는 도중)에 `docker kill --signal KILL spark`로 종료한다.
+   - 중복은 "ClickHouse에는 썼지만 체크포인트에는 커밋하지 못한" 배치에서만 생긴다.
+   - 배치 처리는 약 1초, 트리거는 5초 간격이라 아무 때나 죽이면 대부분 배치 사이에 걸려 중복이 0이 된다. 그래서 쓰기 순간을 노렸다.
+   - 행 수는 HTTP 인터페이스로 0.05초 간격으로 확인했다.
+4. Spark가 죽어 있는 15초 동안 replay는 계속 Kafka에 보낸다.
+5. 같은 체크포인트로 Spark를 다시 시작하고, 전량을 따라잡을 때까지 기다린다.
+
+### 결과
+
+**종료 시점의 상태**
+
+```
+종료: 행 수 변화 감지 119758 → 125941, 종료 1초 뒤 138442행
+종료 전 마지막 완료 로그: [batch 5] rows=20442 written=20442 parse_failed=0 took=1.28s
+checkpoint offsets: 6, commits: 5
+```
+
+- 배치 6의 offset 범위는 체크포인트에 기록됐다(`offsets/6`). 하지만 완료 커밋(`commits/6`)은 없다.
+- 그런데 ClickHouse에는 배치 6이 전부 들어갔다: 138,442 − 119,758 = **18,684행**.
+  - 3개 파티션 task의 INSERT 요청이 이미 ClickHouse에 도착해 있었다. 그래서 Spark 프로세스가 죽어도 서버 쪽에서 insert가 완료됐다.
+
+**재시작 후**
+
+```
+[batch 6] rows=18684 written=18684 parse_failed=0 took=5.39s   ← 커밋되지 않은 배치 6을 같은 offset 범위로 다시 실행
+[batch 7] rows=49998 ...                                        ← 다운타임 동안 쌓인 backlog (maxOffsetsPerTrigger 상한)
+[batch 8] rows=49998 ...
+[batch 9] rows=25899 ...
+[batch 10] rows=13766 ...                                       ← 실시간 속도로 복귀
+```
+
+**중복과 수렴**
+
+| 확인 | 결과 |
+|---|---|
+| replay 전송 성공 / Kafka offset 합계 | 364,054 / 364,054 |
+| `count()` (FINAL 없이) | 382,738 |
+| `uniqExact(flow_id)` | 364,054 |
+| **중복 = `count() − uniqExact(flow_id)`** | **18,684** (= 배치 6 크기와 정확히 같다) |
+| 중복된 Kafka 위치 | 파티션 0: offset 40011–46297 (6,287개) · 1: 39811–45993 (6,183개) · 2: 39936–46149 (6,214개). 모두 2벌 |
+| 중복 행의 version (`spark_processed_ms`) | 두 값이 다르다 (예: `[1793026811026, 1793026780582]`). 다시 실행한 배치가 약 30초 뒤 값이라 더 크다 |
+| **`count() FINAL`** | **364,054** (= uniqExact) |
+| **`OPTIMIZE TABLE … FINAL` 후 `count()`** | **364,054, 중복 0** |
+| 손실 (고유 flow_id, 고유 Kafka 위치) | 없음 (364,054 / 364,054) |
+
+**시간**
+
+| 구간 | 값 |
+|---|---|
+| Spark 다운 (kill → start 명령) | 17.0 s (설정한 15초 + 처리) |
+| 재시작 → 첫 배치 완료 | 14.1 s (JVM·Spark 시작 + 배치 6 재실행 5.4 s) |
+| kill → 전량 따라잡기 | 98.9 s (replay가 kill 후 약 75초 더 보냈다. replay 종료 후 약 23초 만에 따라잡았다) |
+
+### 해석
+
+- **중복은 정확히 "커밋되지 않은 배치 1개"다.** Spark는 체크포인트의 `offsets/6`에 적힌 같은 offset 범위로 배치를 다시 실행한다.
+  그래서 중복 범위가 예측 가능하다. 파티션별 연속된 offset 구간이고, 크기는 배치 하나다.
+- **ReplacingMergeTree(flow_id)로 수렴한다.** 키가 결정적인 값(flow_id)이고 파티션 키가 없다. 그래서 같은 flow_id의 두 행이 merge에서 반드시 만난다.
+  version이 더 큰 행(다시 실행한 배치)이 남는다.
+- **merge 전에는 중복이 보인다.** 조회할 때는 `FINAL`(또는 `argMax`)을 쓰거나, 중복을 감안해 `uniqExact(flow_id)`로 센다.
+  대시보드와 dbt 모델(6단계)에서 이 점을 반영해야 한다.
+- **손실은 없다.** Kafka가 데이터를 보관하고 있고, Spark는 마지막 커밋 지점부터 다시 읽는다.
+- 이것이 "exactly-once는 주장하지 않는다. 중복은 들어올 수 있고 flow_id로 수렴한다"의 실측 근거다.
+
 ## 메모
 
 - `kafka-console-consumer.sh`의 `--property`는 deprecated 경고가 나온다 (Kafka 4.3). 키를 출력할 때는 `--formatter-property print.key=true`를 쓴다.
 - ClickHouse의 `DateTime64` 표시는 서버 시간대(UTC) 기준이다. KST로 보려면 `toTimeZone(inserted_at, 'Asia/Seoul')`를 쓴다.
-- 지금 `flows.raw`와 `flows_raw`에는 전체 1회 재생분(run_id `full-x100`, 364,054건)이 들어 있다.
+- 지금 `flows.raw`와 `flows_raw`에는 장애 테스트 재생분(run_id `failure-test-20261026T235845`, 364,054건, OPTIMIZE 후 중복 0)이 들어 있다.

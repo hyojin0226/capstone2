@@ -187,3 +187,14 @@ docker exec kafka /opt/kafka/bin/kafka-get-offsets.sh --bootstrap-server kafka:9
 ```bash
 docker exec clickhouse clickhouse-client --user capstone --password capstone-dev -q "SELECT kafka_partition, count(), max(kafka_offset)+1 FROM capstone.flows_raw GROUP BY 1 ORDER BY 1"
 ```
+
+## 5. 장애 테스트
+
+replay 도중 Spark를 쓰기 순간에 SIGKILL로 종료했다가 재시작한다. 중복(`count() − uniqExact(flow_id)`)과 `FINAL` 수렴을 출력한다.
+**토픽, 테이블, 체크포인트를 모두 초기화하므로** 남겨야 할 데이터가 있으면 실행하지 않는다. 결과 해석: docs/step2-pipeline.md 7절.
+
+```bash
+bash infra/scripts/failure_test.sh 50 100000 15
+```
+
+인자: 배속(기본 50), 종료를 노리기 시작할 행 수(기본 100000), Spark 다운 시간 초(기본 15).

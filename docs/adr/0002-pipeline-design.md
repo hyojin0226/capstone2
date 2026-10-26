@@ -280,6 +280,8 @@ ClickHouse 서버 메모리 상한은 `max_server_memory_usage_to_ram_ratio=0.8`
   필요하면 `OPTIMIZE TABLE flows_raw FINAL` 후에 `FINAL` 없는 `count()`로도 확인한다.
 - **기록할 것:** 중복 수, 재시작까지 걸린 시간, 재시작 후 처리량. 결과는 docs/에 남긴다.
 - 4단계는 같은 지표로 "MinIO 원본 → 재처리" 시나리오를 검증한다.
+- **결과 (2026-10-26):** 쓰기 도중 SIGKILL → 중복 18,684행(= 커밋되지 않은 배치 1개), `count() FINAL`과 `OPTIMIZE … FINAL` 후 모두 364,054로 수렴, 손실 0.
+  상세: docs/step2-pipeline.md 7절, 재현: `infra/scripts/failure_test.sh`.
 
 ## 열린 질문 (구현하면서 확인할 것)
 

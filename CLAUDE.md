@@ -58,7 +58,7 @@ docs/              # 설계 결정 기록(ADR), 성능 실험 결과
   - 라벨 규칙: 배경 트래픽 필터 F2, a/b 쌍을 묶는 `session_id`, `label_noise_suspect` 플래그 (docs/step4-labeling.md)
   - baseline: `src/model/train_baseline.py`. 세션 분할 macro-F1 0.523 ± 0.023, 바이트 가중 정확도 0.985. 노이즈 제외 학습 채택 (docs/step5-baseline.md)
   - 알려진 한계: email 세션 2개, 패킷 3개 이하 플로우의 정확도 낮음
-- [ ] 2단계 파이프라인 구축: docker-compose 최소 파이프라인 (Replay → Kafka → Spark → ClickHouse)
+- [x] 2단계 파이프라인 구축: docker-compose 최소 파이프라인 (Replay → Kafka → Spark → ClickHouse)
   - 설계: docs/adr/0002-pipeline-design.md (상태: 채택). 구현 기록: docs/step2-pipeline.md
   - [x] Kafka + ClickHouse compose, `flows.raw` 토픽, `flows_raw` 테이블 (infra/)
   - [x] flow_id 추가 (`src/extract/flow_id.py`, 364,054행 중복 0)
@@ -66,5 +66,5 @@ docs/              # 설계 결정 기록(ADR), 성능 실험 결과
   - [x] Spark Structured Streaming → ClickHouse (`src/streaming/flows_to_clickhouse.py`, 커스텀 이미지 `capstone2/spark:4.1.3`)
     - F2는 지우지 않고 `f2_passed`로 표시. 체크포인트 `/checkpoints/flows_raw`(볼륨 `spark-checkpoints`). 추론 없음
     - 전체 364,054건 100배속: 전송 = Kafka offset 합계 = ClickHouse 행 수, 중복 0, F2 불일치 0 (docs/step2-pipeline.md 6절)
-  - [ ] 2단계 장애 테스트: Spark 강제 종료 후 재시작, 중복 = count() − uniqExact(flow_id) (ADR 0002 결정 5 "검증")
+  - [x] 2단계 장애 테스트 (`infra/scripts/failure_test.sh`): 쓰기 도중 SIGKILL → 중복 18,684 (= 커밋 안 된 배치 1개), FINAL·OPTIMIZE로 364,054 수렴, 손실 0 (docs/step2-pipeline.md 7절)
 - [ ] 3단계 스트리밍 처리: 모델 직렬화 형식 결정, Spark 추론, 품질 검사, 멱등 적재
