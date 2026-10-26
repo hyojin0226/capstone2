@@ -128,6 +128,12 @@ docker exec clickhouse clickhouse-client --user capstone --password capstone-dev
 docker exec clickhouse clickhouse-client --user capstone --password capstone-dev --queries-file /schema/003_inference_columns.sql
 ```
 
+```bash
+docker exec clickhouse clickhouse-client --user capstone --password capstone-dev --queries-file /schema/004_quality_tables.sql
+```
+
+`004`는 `flows_raw`에 품질 컬럼을 추가하고 `flows_rejected`, `pipeline_batches`를 만든다. 새로 시작할 때도 `001` 다음에 `004`를 실행해야 두 테이블이 생긴다.
+
 중복 확인 쿼리 (장애 테스트용, ADR 0002 결정 5):
 
 ```bash
@@ -214,3 +220,21 @@ bash infra/scripts/failure_test.sh 50 100000 15
 ```
 
 인자: 배속(기본 50), 종료를 노리기 시작할 행 수(기본 100000), Spark 다운 시간 초(기본 15).
+
+## 6. 3단계 완료 기준 검증
+
+replay 출력을 파일로 남긴 뒤 검증 스크립트에 넘긴다. 오류 주입이 없는 실행이면 주입 항목은 SKIP된다.
+
+```bash
+python src/replay/producer.py --speed 100 --inject-faults 0.01 --run-id verify | tee /tmp/replay.log
+```
+
+```bash
+python infra/scripts/verify_step3.py --replay-log /tmp/replay.log
+```
+
+장애 테스트에 오류 주입을 함께 켜려면:
+
+```bash
+PRODUCER_ARGS="--inject-faults 0.01" bash infra/scripts/failure_test.sh 50 100000 15
+```

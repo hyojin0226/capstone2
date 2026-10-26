@@ -7,8 +7,11 @@
 | 학습·추론 런타임 맞추기 (xgboost-cpu 3.2.0) | 완료 (아래 1) |
 | 모델 직렬화 (`models/<version>/model.json`, `metadata.json`) | 완료 (아래 2) |
 | 환경 간 예측 일치 (WSL ↔ Spark 이미지) | 완료 (아래 3) |
-| Spark 추론 (mapInPandas, 현재 대상 = f2_passed) | 완료 (아래 4, 5) |
-| 품질 검사 (flows_rejected, quality_flags, pipeline_batches), 오류 주입 | 아직 없음 |
+| Spark 추론 (mapInPandas) | 완료 (아래 4, 5). 대상은 6절부터 `f2_passed AND quality_ok` |
+| 품질 검사 (flows_rejected, quality_flags, pipeline_batches) | 완료 (아래 6) |
+| replay 오류 주입 (`--inject-faults`) | 완료 (아래 7) |
+| ADR 0003 완료 기준 검증 | **전부 통과** (아래 8–10) |
+| held-out 세션으로 운영 모델 재학습 | 제안 단계 (아래 11) |
 
 ## 1. 학습·추론 런타임 맞추기 (2026-10-27)
 
@@ -166,3 +169,176 @@ ClickHouse 결과는 float32 확률을 정확히 비교하려고 `FORMAT Parquet
 - 배치 4부터는 추론한 행과 안 한 행의 지연 차이가 방향이 일정하지 않고 ±1 s 안이다. insert 시점 차이는 0–0.2 s다.
   → **안정 상태에서 추론 비용은 지연에 거의 드러나지 않는다.** 전체 p50 증가(4.6 → 5.1 s)는 시작 구간의 영향이 크다.
 - 개선 후보 (5단계에서 실험): 스트림 시작 전에 모델을 미리 읽는 warm-up, 시작 직후 배치 크기 조정.
+
+## 6. 품질 검사 (`src/streaming/quality.py`, 2026-10-27)
+
+```
+Kafka 레코드 (값 + 헤더 x-fault)
+  → parse: 펼친 컬럼, raw_value, fault_type, reject_reason, quality_flags/quality_ok, f2_passed
+  → reject_reason 있음 ──▶ flows_rejected (원문, 사유, Kafka 위치)
+  → reject_reason 없음 ──▶ 추론(f2_passed AND quality_ok) ──▶ flows_raw
+  → 배치 지표 ──▶ pipeline_batches
+```
+
+### hard reject (`flows_rejected`)
+
+Spark 4.1의 JSON 파싱 동작을 먼저 실험으로 확인했다.
+- 깨진 JSON: `try_parse_json`이 null을 돌려준다. `from_json` 결과 구조체는 null이 아니고 모든 필드가 null이다.
+- 필드 누락, 타입이 틀린 값: 해당 필드만 null이 된다 (부분 파싱).
+
+그래서 사유를 이 순서로 판정한다.
+
+| 사유 | 조건 |
+|---|---|
+| `malformed_json` | `try_parse_json(value)`가 null |
+| `unsupported_schema_version` | `schema_version`이 [1]에 없음 |
+| `missing_or_invalid_field` | 적재할 메시지 컬럼(88개) 중 하나라도 null |
+
+`flows_raw` 컬럼은 null을 허용하지 않는다. 그래서 세 번째 검사는 "insert 실패로 배치 전체가 멈추는 것"도 막는다.
+`flows_rejected`는 `ReplacingMergeTree(spark_processed_ms) ORDER BY (kafka_partition, kafka_offset)`이다. flow_id가 없을 수 있으므로 Kafka 위치가 키다.
+
+### soft flag (`quality_ok`, `quality_flags`)
+
+ADR 0003 4-2의 규칙을 구현했다. 실데이터 364,054건에서 위반 0을 확인한 규칙들이다.
+- `packets_sum`, `bytes_sum`, `packets_min`, `time_order`, `duration`, `bytes_per_packet`, `flags_le_packets`, `non_tcp_flags`, `port_range`, `negative_feature`
+- 방향별 `ps_order_<dir>`, `piat_order_<dir>`, `empty_direction_<dir>`
+
+**ADR과 다른 점: `quality_flags`는 배열이 아니라 쉼표로 이은 문자열이다.**
+Spark JDBC 기본 dialect는 `ArrayType`을 JDBC 타입으로 바꾸지 못한다. 그래서 문자열로 받고, ClickHouse에 `quality_flag_list Array(String) ALIAS arrayFilter(x -> x != '', splitByChar(',', quality_flags))`를 두어 배열처럼 쓴다.
+
+### 추론 대상 변경
+
+`add_predictions`의 대상을 `f2_passed`에서 **`f2_passed AND quality_ok`** 로 바꿨다 (ADR 0003 결정 3의 최종 형태).
+
+### 배치 지표 (`pipeline_batches`)
+
+배치마다 한 행을 남긴다.
+- 개수: input / rejected / stored / flagged / f2_passed / inferred / injected
+- 시간: prepare(파싱·품질·F2 계산과 개수 세기) / write(추론 포함 쓰기) / 전체
+- `end_offsets`, `model_version`
+
+`ReplacingMergeTree ORDER BY batch_id`라서, 같은 배치를 다시 실행하면 나중 행이 남는다.
+
+### 스키마
+
+`004_quality_tables.sql`이 하는 일:
+- `flows_raw`에 `quality_ok`, `quality_flags`, `quality_flag_list`(ALIAS), `fault_type` 추가
+- `flows_rejected`, `pipeline_batches` 생성
+
+새로 만들 때 쓰는 `001`과 마이그레이션을 적용한 테이블의 컬럼 이름·순서가 같은지 임시 DB에서 확인했다.
+`reset_pipeline.sh`는 세 테이블을 모두 비운다.
+
+## 7. replay 오류 주입 (`src/replay/faults.py`, `--inject-faults`)
+
+- 정상 메시지는 그대로 보내고, 정해진 확률로 **망가뜨린 메시지를 추가로** 보낸다. 유형은 seed 고정 무작위(`--fault-seed`, 기본 42).
+- **표시:** Kafka 헤더 `x-fault: <유형>`. 깨진 JSON도 본문 밖에서 구분된다. Spark가 `includeHeaders`로 읽어 `fault_type` 컬럼(`flows_raw`, `flows_rejected` 모두)에 남긴다. 정상 데이터는 `''`.
+- **새 flow_id:** `BLAKE2b-64(base_flow_id | "<run_id>:fault:<유형>" | 순번)`. 원본과 같은 flow_id면 ReplacingMergeTree가 둘을 합쳐 개수를 셀 수 없다.
+- **soft 유형은 F2를 통과하는 행**을 바탕으로 만든다. "F2는 통과하지만 품질 때문에 추론에서 빠지는지"를 확인하기 위해서다.
+- 기대 결과는 `faults.EXPECTED`에 코드로 적었다. 검증 스크립트가 이 표를 그대로 쓴다.
+
+| 유형 | 만드는 방법 | 기대 결과 |
+|---|---|---|
+| `malformed_json` | JSON 문자열을 절반에서 자름 | reject `malformed_json` |
+| `missing_field` | `features.bidirectional_bytes` 삭제 | reject `missing_or_invalid_field` |
+| `wrong_type` | `features.src2dst_packets = "many"` | reject `missing_or_invalid_field` |
+| `bad_schema_version` | `schema_version = 99` | reject `unsupported_schema_version` |
+| `packets_sum` | `bidirectional_packets += 1` | flag `packets_sum` |
+| `time_order` | `orig_last_seen_ms = orig_first_seen_ms − 1000` | flag `time_order` |
+| `ps_order` | `bidirectional_min_ps = max_ps + 1` | flag `ps_order_bidirectional` |
+| `negative_feature` | `src2dst_duration_ms = −5` | flag `negative_feature` |
+
+smoke test (5,000건, 주입 5%): 주입 248건. hard 113건이 모두 reject, soft 135건이 모두 flag됐다.
+F2 통과 1,080 = 추론 945(정상) + soft 주입 135(추론에서 빠짐).
+
+## 8. 완료 기준 검증: 오류 주입 1% + 전체 364,054건 (`infra/scripts/verify_step3.py`)
+
+```bash
+bash infra/scripts/reset_pipeline.sh
+python src/replay/producer.py --speed 100 --run-id quality-full-x100 --inject-faults 0.01 | tee /tmp/replay_full.log
+python infra/scripts/verify_step3.py --replay-log /tmp/replay_full.log
+```
+
+```
+sent 367,755 | delivered 367,755 | failed 0 | unflushed 0
+injected 3,701 (normal 364,054): {"malformed_json": 438, "missing_field": 494, "wrong_type": 409, "bad_schema_version": 449, "packets_sum": 463, "time_order": 446, "ps_order": 499, "negative_feature": 503}
+
+[PASS] fault malformed_json: injected 438, rejected as 'malformed_json' 438, rejected total 438, stored 0
+[PASS] fault missing_field: injected 494, rejected as 'missing_or_invalid_field' 494, rejected total 494, stored 0
+[PASS] fault wrong_type: injected 409, rejected as 'missing_or_invalid_field' 409, rejected total 409, stored 0
+[PASS] fault bad_schema_version: injected 449, rejected as 'unsupported_schema_version' 449, rejected total 449, stored 0
+[PASS] fault packets_sum: injected 463, flagged 'packets_sum' 463, stored total 463, inferred 0
+[PASS] fault time_order: injected 446, flagged 'time_order' 446, stored total 446, inferred 0, also flagged ['duration']
+[PASS] fault ps_order: injected 499, flagged 'ps_order_bidirectional' 499, stored total 499, inferred 0
+[PASS] fault negative_feature: injected 503, flagged 'negative_feature' 503, stored total 503, inferred 0
+[PASS] normal data: no reject, no flag: normal rejected 0, normal flagged 0, normal stored 364,054
+[PASS] accounting: sent = flows_raw flow_id + rejected positions: 367,755 = 365,965 + 1,790 (kafka 367,755)
+[PASS] inference target = f2_passed AND quality_ok: mismatched rows 0, inferred 8,758
+[PASS] prediction parity (normal data) vs offline: inferred 8,758 vs offline 8,758, only one side 0, class mismatches 0, max |conf diff| 0.0
+[PASS] pipeline_batches totals = table counts: batches {'i': 367755, 'r': 1790, 's': 365965, 'f': 1911, 'n': 8758, 'j': 3701} vs tables (같음)
+
+13/13 checks passed
+```
+
+- `time_order` 주입은 `duration` 규칙에도 걸린다. 마지막 시각을 바꾸면 "지속 시간 = 마지막 − 처음"도 깨지므로 정상 동작이다.
+- 정상 데이터만 보낸 실행(`quality-latency-x100`, 10절)에서도 `[SKIP]`을 뺀 5/5를 통과했다. 정상 데이터에서는 reject 0, flag 0이다.
+
+### 누수 방지 (`src/streaming/check_no_leak.py`)
+
+Spark 이미지에서 추론 함수 `_predict_batches`에 F2 통과 8,758행을 넣었다.
+라벨·IP·포트·시각·주입 표시 등 15개 비피처 열을 바꿔도 예측이 같아야 한다.
+
+```bash
+docker run --rm --entrypoint bash -v "$PWD/src:/opt/app/src:ro" -v "$PWD/models:/opt/app/models:ro" \
+  -v "$PWD/data/dataset:/opt/app/data:ro" -e MODEL_DIR=/opt/app/models/xgb-20261027-289d0474 capstone2/spark:4.1.3 \
+  -c 'export PYTHONPATH=/opt/app/src/streaming:/opt/app/src/extract:/opt/spark/python:$(ls /opt/spark/python/lib/py4j-*.zip); python3 /opt/app/src/streaming/check_no_leak.py'
+```
+
+```
+[PASS] non-feature columns shuffled: 8,758 rows, predictions identical = True
+[PASS] non-feature columns dropped: 8,758 rows, predictions identical = True
+[PASS] column order reversed: 8,758 rows, predictions identical = True
+```
+
+## 9. 장애 테스트 재실행: 추론·품질 컬럼 + 오류 주입 1%
+
+```bash
+PRODUCER_ARGS="--inject-faults 0.01" bash infra/scripts/failure_test.sh 50 100000 15
+python infra/scripts/verify_step3.py --replay-log /tmp/failure_test_replay.log
+```
+
+**종료 시점:** 행 수 변화 감지 107,770 → 121,713. 체크포인트는 `offsets/4`, `commits/3`이었다. 배치 4(13,943행)가 쓰였지만 커밋되지 않았다.
+재시작 후 `[batch 4] rows=14002 written=13943 rejected=59 ...`로 같은 배치가 다시 실행됐다.
+
+| 확인 | 결과 |
+|---|---|
+| 측정 시점 `count() − uniqExact(flow_id)` (FINAL 없이) | **0** (아래 설명) |
+| 실제로 쓰인 행 (`system.part_log` NewPart 합계) | **379,908 = 365,965 + 13,943** → 배치 4가 두 번 쓰였다 |
+| `flows_raw` / `flows_rejected` / `pipeline_batches` FINAL | 365,965 / 1,790 / 18 (= 각 고유 키 수) |
+| OPTIMIZE 후 세 테이블 중복 | 0 / 0 / 0 |
+| 손실 | 없음. `verify_step3.py` 13/13 통과 (회계 367,755 = 365,965 + 1,790) |
+| 재시작 → 첫 배치 완료 | 20.0 s (2단계 14.1 s. 추론 모델 로딩과 Python worker 시작이 늘었다) |
+
+**측정에서 새로 알게 된 것:** 2단계 테스트와 달리, 측정 시점에 FINAL 없이 세도 중복이 0이었다.
+`system.part_log`를 보니 중복 13,943행은 실제로 쓰였다. 실행 도중 일반 merge가 7번 있었고, 그중 41만 행 규모의 merge가 측정 전에 중복을 합쳤다.
+- 즉 `count() − uniqExact(flow_id)`는 **merge 시점에 따라 달라지는** 측정이다.
+- "실제로 쓰인 중복"은 `part_log`의 NewPart 행 합계 − 고유 키 수로 센다.
+- `failure_test.sh`에 이 측정을 추가했다.
+- ReplacingMergeTree가 백그라운드에서 스스로 수렴한다는 것을 보여주는 증거이기도 하다.
+
+## 10. 지연과 자원 (정상 데이터, 100배속, 튜닝 전 1회)
+
+| | 2단계 (적재만) | 3단계 추론만 | 3단계 추론 + 품질 |
+|---|---|---|---|
+| E2E p50 / p90 / p99 / 최대 | 4.6 / 6.5 / 7.8 / 8.2 s | 5.1 / 8.2 / 9.7 / 10.6 s | 6.2 / 10.5 / 12.0 / 12.6 s |
+| 배치 처리 평균 / 최대 | 약 1.0 s | 1.90 / 5.92 s | 2.68 / 6.86 s (prepare 1.62 + write 1.05) |
+| 안정 구간 배치 평균 (배치 4부터) | — | — | 1.99 s |
+| Spark 메모리 (처리 직후) | 2.01 GiB | 2.50 GiB | **3.54 GiB / 4 GiB** |
+
+- 품질 검사로 늘어난 비용은 주로 **prepare 단계**다.
+  배치를 persist하고 개수 집계(6개)와 파티션별 offset을 계산한다. 그 결과로 쓰기 단계에서 배치를 세 갈래(reject / 저장 / 지표)로 나눠 쓸 수 있다.
+- **Spark 메모리가 한도에 가깝다 (3.54 / 4 GiB).** persist한 배치에 원문 `raw_value`(행당 약 2 KB, 배치 5만 행이면 약 100 MB)가 함께 올라가는 것이 주원인으로 추정된다.
+  5단계 부하 테스트에서 OOM 위험이 있다. 개선 후보:
+  - raw_value는 reject 행에만 남기고 persist 대상에서 빼기
+  - `maxOffsetsPerTrigger` 조정
+  - 컨테이너 메모리 재배분
+- E2E의 대부분은 여전히 트리거 대기(5초)와 시작 구간의 밀린 데이터다. 튜닝은 5단계에서 같은 조건으로 전후 비교한다.

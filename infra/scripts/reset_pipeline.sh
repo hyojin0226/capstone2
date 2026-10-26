@@ -19,6 +19,8 @@ for _ in $(seq 1 20); do $KAFKA/kafka-topics.sh --bootstrap-server kafka:9092 --
 $KAFKA/kafka-topics.sh --bootstrap-server kafka:9092 --create --topic flows.raw --partitions 3 --replication-factor 1 2>&1 | grep -v WARNING
 
 $CH -q "TRUNCATE TABLE capstone.flows_raw"
+$CH -q "TRUNCATE TABLE IF EXISTS capstone.flows_rejected"
+$CH -q "TRUNCATE TABLE IF EXISTS capstone.pipeline_batches"
 
 $COMPOSE up -d spark >/dev/null 2>&1
 until docker logs spark 2>&1 | grep -q "^started:"; do
@@ -26,4 +28,4 @@ until docker logs spark 2>&1 | grep -q "^started:"; do
   sleep 1
 done
 docker logs spark 2>&1 | grep -E "^model:|^started:"
-echo "reset done: flows.raw empty, flows_raw truncated, checkpoint cleared"
+echo "reset done: flows.raw empty, flows_raw/flows_rejected/pipeline_batches truncated, checkpoint cleared"

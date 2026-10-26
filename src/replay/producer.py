@@ -3,6 +3,7 @@
 사용법 (호스트 venv에서, Kafka 호스트 리스너 localhost:9094):
     python src/replay/producer.py --limit 1000 --speed 1
     python src/replay/producer.py --speed 10 --loop 3 --run-id-in-hash     # 부하 테스트
+    python src/replay/producer.py --speed 100 --inject-faults 0.01         # 품질 검사 검증 (faults.py)
 
 재생 규칙
 - 입력: 필터 전 data/flows/*.parquet 전체 (배경 트래픽 필터는 파이프라인 안에서 한다)
@@ -15,6 +16,7 @@
 
 import argparse
 import json
+import random
 import re
 import sys
 import time
@@ -26,8 +28,10 @@ import pandas as pd
 from confluent_kafka import KafkaException, Producer
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "extract"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from faults import EXPECTED, FAULT_HEADER, FAULT_TYPES, SOFT_TYPES, corrupt  # noqa: E402
 from flow_id import run_flow_id  # noqa: E402
-from labeling import label_from_filename, noise_suspect  # noqa: E402
+from labeling import is_background, label_from_filename, noise_suspect  # noqa: E402
 
 SCHEMA_VERSION = 1
 
@@ -49,6 +53,7 @@ def load_timeline(flows_dir: Path) -> tuple[pd.DataFrame, list[str]]:
     for col in ["service_class", "app", "activity", "session_id"]:
         df[col] = df["source_file"].map(lambda f, c=col: labels[f][c])
     df["noise_suspect"] = noise_suspect(df)
+    df["f2_pass"] = ~is_background(df)  # 오류 주입에서 soft 유형의 바탕 행을 고를 때만 쓴다
     df["requested_server_name"] = df["requested_server_name"].fillna("")
 
     pcap_start = df.groupby("source_file")["bidirectional_first_seen_ms"].transform("min")
@@ -92,9 +97,14 @@ def main() -> None:
     parser.add_argument("--run-id", default=None, help="기본값: 시작 시각 (YYYYmmddTHHMMSS)")
     parser.add_argument("--run-id-in-hash", action="store_true",
                         help="flow_id에 run_id·loop_idx를 섞는다 (부하 테스트용)")
+    parser.add_argument("--inject-faults", type=float, default=0.0,
+                        help="정상 메시지 하나당 망가뜨린 메시지를 추가로 보낼 확률 (0 = 끔). 품질 검사 검증용")
+    parser.add_argument("--fault-seed", type=int, default=42)
     args = parser.parse_args()
     if args.speed <= 0:
         parser.error("--speed는 0보다 커야 한다")
+    if not 0 <= args.inject_faults <= 1:
+        parser.error("--inject-faults는 0과 1 사이여야 한다")
 
     run_id = args.run_id or datetime.now().strftime("%Y%m%dT%H%M%S")
 
@@ -104,7 +114,11 @@ def main() -> None:
         df = df.head(args.limit)
     rows = df.to_dict("records")
     print(f"loaded {len(rows):,} flows ({len(features)} features) in {time.perf_counter() - t_load:.1f}s | "
-          f"run_id={run_id} speed={args.speed} loop={args.loop} run_id_in_hash={args.run_id_in_hash}")
+          f"run_id={run_id} speed={args.speed} loop={args.loop} run_id_in_hash={args.run_id_in_hash} "
+          f"inject_faults={args.inject_faults}")
+    rng = random.Random(args.fault_seed)
+    f2_rows = [r for r in rows if r["f2_pass"]]   # soft 오류는 F2 통과 행으로 만든다 (추론에서 빠지는지 확인)
+    injected = Counter()
 
     producer = Producer({
         "bootstrap.servers": args.bootstrap,
@@ -148,6 +162,23 @@ def main() -> None:
                         producer.poll(0.1)
                 producer.poll(0)
                 sent += 1
+
+                if args.inject_faults and rng.random() < args.inject_faults:
+                    fault = rng.choice(FAULT_TYPES)
+                    base = rng.choice(f2_rows) if fault in SOFT_TYPES and f2_rows else row
+                    fault_id = run_flow_id(base["flow_id"], f"{run_id}:fault:{fault}", sum(injected.values()))
+                    fmsg = build_message(base, features, fault_id, run_id, loop_idx,
+                                         event_time_ms=base_wall_ms + int(rel_s * 1000))
+                    fmsg["ts"]["replay_sent_ms"] = int(time.time() * 1000)
+                    while True:
+                        try:
+                            producer.produce(args.topic, key=str(fault_id), value=corrupt(fmsg, fault),
+                                             headers=[(FAULT_HEADER, fault.encode())], on_delivery=on_delivery)
+                            break
+                        except BufferError:
+                            producer.poll(0.1)
+                    injected[fault] += 1
+                    sent += 1
             loop_idx += 1
     except KeyboardInterrupt:
         print("interrupted")
@@ -162,6 +193,10 @@ def main() -> None:
     print(f"send loop {send_s:.2f}s (expected per loop {expected:.2f}s = timeline span ÷ speed, loops {loop_idx}) | "
           f"final flush {t_end - t_send_done:.2f}s | {sent / send_s if send_s > 0 else 0:,.0f} msg/s")
     print("per partition:", dict(sorted(delivered.items())))
+    if args.inject_faults:
+        print(f"injected {sum(injected.values()):,} (normal {sent - sum(injected.values()):,}):",
+              json.dumps({t: injected[t] for t in FAULT_TYPES}))
+        print("expected:", json.dumps({t: f"{k}:{v}" for t, (k, v) in EXPECTED.items()}))
     if failed:
         print("first errors:", failed[:3])
         raise SystemExit(1)

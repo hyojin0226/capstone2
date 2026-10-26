@@ -72,7 +72,11 @@ docs/              # 설계 결정 기록(ADR), 성능 실험 결과
   - [x] 런타임 맞추기: 학습·Spark 모두 xgboost-cpu 3.2.0 (Spark 이미지 Python 3.10). baseline 재학습 0.521 ± 0.022
   - [x] 모델 직렬화: `src/model/export_model.py` → `models/xgb-20261027-289d0474/` (model.json + metadata.json, git 제외)
   - [x] 환경 간 예측 일치: WSL ↔ Spark 이미지 8,758건 불일치 0, 확률 차이 0.0 (`src/model/predict_file.py`)
-  - [x] Spark 추론 (`src/streaming/inference.py`, mapInPandas). 현재 대상 = f2_passed (품질 검사 후 AND quality_ok 추가)
-    - 전체 364,054건: 추론 8,758 = F2 통과 수, 오프라인 예측과 클래스·확률 불일치 0 (docs/step3-streaming.md 5절)
+  - [x] Spark 추론 (`src/streaming/inference.py`, mapInPandas). 대상 = f2_passed AND quality_ok
+    - 오프라인 예측과 8,758건 클래스·확률 불일치 0 (docs/step3-streaming.md 5절)
     - 초기화는 `infra/scripts/reset_pipeline.sh`
-  - [ ] 품질 검사 (flows_rejected, quality_flags, pipeline_batches) + replay 오류 주입 검증
+  - [x] 품질 검사 (`src/streaming/quality.py`): flows_rejected(hard reject), quality_ok/quality_flags(soft), pipeline_batches(배치 지표)
+  - [x] replay 오류 주입 (`--inject-faults`, `src/replay/faults.py`): Kafka 헤더 x-fault → fault_type 컬럼
+  - [x] **ADR 0003 완료 기준 전부 통과** (`infra/scripts/verify_step3.py` 13/13, 누수 테스트 3/3, 장애 테스트 FINAL 수렴·손실 0) — docs/step3-streaming.md 8–10절
+    - 알려진 위험: Spark 메모리 3.54 / 4 GiB (persist한 raw_value). 5단계 첫 개선 대상
+  - [ ] held-out 세션으로 운영 모델 재학습 (실시간 예측이 in-sample인 문제). email 처리 방식 제안 후 승인 대기

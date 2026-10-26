@@ -282,6 +282,9 @@ ClickHouse 서버 메모리 상한은 `max_server_memory_usage_to_ram_ratio=0.8`
 - 4단계는 같은 지표로 "MinIO 원본 → 재처리" 시나리오를 검증한다.
 - **결과 (2026-10-26):** 쓰기 도중 SIGKILL → 중복 18,684행(= 커밋되지 않은 배치 1개), `count() FINAL`과 `OPTIMIZE … FINAL` 후 모두 364,054로 수렴, 손실 0.
   상세: docs/step2-pipeline.md 7절, 재현: `infra/scripts/failure_test.sh`.
+- **측정 방법 보완 (2026-10-27):** 3단계에서 다시 돌렸을 때 측정 시점의 `count() − uniqExact(flow_id)`가 0이었다.
+  백그라운드 merge가 측정 전에 중복(13,943행)을 이미 합쳤기 때문이다.
+  그래서 "실제로 쓰인 중복"은 `system.part_log`의 NewPart 행 합계 − 고유 키 수로 센다 (docs/step3-streaming.md 9절).
 
 ## 열린 질문 (구현하면서 확인할 것)
 

@@ -1,4 +1,4 @@
-"""Spark 추론: f2_passed 행만 mapInPandas로 XGBoost 예측. 설계: docs/adr/0003-inference-and-quality.md 결정 3
+"""Spark 추론: f2_passed AND quality_ok 행만 mapInPandas로 XGBoost 예측. 설계: docs/adr/0003-inference-and-quality.md 결정 3
 
 - 모델은 MODEL_DIR(models/<version>)의 model.json + metadata.json을 읽는다
 - Python worker 프로세스마다 처음 한 번만 로딩해서 캐시한다
@@ -68,10 +68,11 @@ def _predict_batches(batches):
 
 
 def add_predictions(df: DataFrame) -> DataFrame:
-    """f2_passed 행은 추론하고, 나머지는 기본값을 채워서 합친다 (행 수는 그대로)."""
+    """추론 대상(f2_passed AND quality_ok)은 추론하고, 나머지는 기본값을 채워서 합친다 (행 수는 그대로)."""
+    target = F.col("f2_passed") & F.col("quality_ok")
     out_schema = StructType(df.schema.fields + PRED_FIELDS)
-    inferred = df.filter(F.col("f2_passed")).mapInPandas(_predict_batches, schema=out_schema)
-    skipped = (df.filter(~F.col("f2_passed"))
+    inferred = df.filter(target).mapInPandas(_predict_batches, schema=out_schema)
+    skipped = (df.filter(~target)
                .withColumn("inferred", F.lit(False))
                .withColumn("pred_service_class", F.lit(""))
                .withColumn("pred_confidence", F.lit(0.0).cast("float"))

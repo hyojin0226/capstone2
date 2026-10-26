@@ -98,7 +98,7 @@ XGBoost는 "새 버전이 옛 모델을 읽는 것"만 보장하고, 반대 방�
   - 모델은 F2를 통과한 서비스 트래픽으로만 학습했다. 배경 트래픽(전체의 97.6%)은 분포 밖이라 예측이 의미가 없다.
   - 추론량이 약 40분의 1로 줄어든다.
 - **추론하지 않는 행:** `pred_service_class = ''`, `pred_confidence = 0`, `inferred = false`로 둔다.
-- **구현 (2026-10-27):** 품질 검사보다 추론을 먼저 구현했다. 그래서 지금 추론 대상은 `f2_passed`뿐이다. 품질 검사를 붙일 때 `AND quality_ok`를 추가한다.
+- **구현 (2026-10-27):** 품질 검사보다 추론을 먼저 구현했다 (그때 대상은 `f2_passed`뿐). 품질 검사를 붙이면서 대상을 `f2_passed AND quality_ok`로 바꿨다.
   Spark 예측은 오프라인 예측과 8,758건 모두 클래스·확률이 비트 단위로 같다 (docs/step3-streaming.md 5절).
 - **피처:** `metadata.json`의 `features` 순서로만 고른다. `label.*`, `meta.*`(IP, 포트), `ts.*`는 추론 함수에 넘기지 않는다.
   CLAUDE.md의 누수 방지 원칙을 코드 구조로 강제하는 장치다.
@@ -110,7 +110,7 @@ XGBoost는 "새 버전이 옛 모델을 읽는 것"만 보장하고, 반대 방�
 | 컬럼 | 타입 | 의미 |
 |---|---|---|
 | `quality_ok` | Bool | soft 품질 규칙을 모두 통과 |
-| `quality_flags` | Array(LowCardinality(String)) | 위반한 규칙 이름들 |
+| `quality_flags` | String (쉼표 구분) + `quality_flag_list` Array(String) ALIAS | 위반한 규칙 이름들. 구현 중 변경: Spark JDBC 기본 dialect가 배열 타입을 지원하지 않는다 |
 | `inferred` | Bool | 추론했는지 |
 | `pred_service_class` | LowCardinality(String) | 예측 클래스 (추론 안 했으면 '') |
 | `pred_confidence` | Float32 | 예측 클래스의 확률 |
@@ -187,6 +187,23 @@ XGBoost는 "새 버전이 옛 모델을 읽는 것"만 보장하고, 반대 방�
 | 회계 | 보낸 수 = flows_raw 고유 flow_id + flows_rejected 고유 위치 |
 | 멱등 | 2단계 장애 테스트를 다시 실행해서, 추론 컬럼이 있어도 FINAL로 수렴하는지 확인 |
 | 지연 | 추론을 넣기 전과 후의 E2E 지연과 배치 처리 시간 비교 (같은 배속) |
+
+### 검증 결과 (2026-10-27) — 전부 통과
+
+상세: docs/step3-streaming.md 8–10절. 재현: `infra/scripts/verify_step3.py`, `src/streaming/check_no_leak.py`, `infra/scripts/failure_test.sh`.
+
+| 항목 | 결과 |
+|---|---|
+| 예측 일치 | 8,758건, 클래스 불일치 0, 확률 차이 0.0 (비트 단위 동일) |
+| 추론 대상 | `inferred ≠ (f2_passed AND quality_ok)`인 행 0. 정상 데이터 추론 8,758 |
+| 누수 방지 | 비피처 15개 열을 섞기·삭제·순서 반전해도 예측 동일 (3/3) |
+| 품질 검사 | 오류 8개 유형(1% 주입, 3,701건) 모두 주입 수 = reject/flag 수. soft 주입 행 추론 0. 정상 데이터 reject 0, flag 0 |
+| 회계 | 367,755 = flows_raw 365,965 + flows_rejected 1,790 = Kafka offset 합계 |
+| 멱등 | 추론·품질 컬럼 + 오류 주입 상태의 장애 테스트: 실제로 쓰인 중복 13,943행(part_log), FINAL·OPTIMIZE 후 세 테이블 모두 수렴, 손실 0 |
+| 지연 | E2E p50 4.6 → 5.1(추론) → 6.2 s(추론 + 품질). 배치 평균 1.0 → 2.68 s. Spark 메모리 3.54 / 4 GiB (5단계 개선 대상) |
+
+**측정 방법 보완:** 중복은 `count() − uniqExact`만으로 세지 않는다. 백그라운드 merge가 측정 전에 중복을 합칠 수 있기 때문이다.
+실제로 쓰인 중복은 `system.part_log`의 NewPart 행 합계 − 고유 키 수로 센다.
 
 ## 이 ADR 범위 밖 / 열린 질문
 
