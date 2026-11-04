@@ -8,9 +8,15 @@ Kafka → Spark Structured Streaming → ClickHouse → dbt → Grafana로 흘�
 
 ## 확정된 설계 결정
 - **Replay 단위: 플로우 레코드(A안).** 피처는 NFStream이 오프라인으로 생성. Spark는 품질 검사, 모델 추론,
-  시간 윈도우 집계(유형별 트래픽, 급증 탐지 지표)를 담당한다. 패킷 단위 replay는 하지 않는다.
+  적재를 담당한다. 패킷 단위 replay는 하지 않는다.
+- **시간 윈도우 집계 (ADR 0004, 2026-11-04 변경):** Spark가 아니라 ClickHouse가 중복 제거된 flows_raw(FINAL) 위에서
+  조회 시점 뷰로 집계한다 (대시보드·알림). 이력·분석은 dbt. Spark 상태 집계와 증분 sum MV는 쓰지 않는다.
+  이유: at-least-once 중복과 재추론(예측 값 변경)을 추가 작업 없이 반영하기 위해서다.
+- **원본 보존 (ADR 0005):** Kafka 레코드 원본을 Spark 두 번째 스트리밍 쿼리(file sink)로 MinIO에 Parquet 저장.
+  재처리는 보존본을 Spark 배치 잡으로 읽어 스트리밍과 같은 코드로 처리한다.
 - **모델:** XGBoost를 오프라인 학습 → 직렬화 → Spark에서 추론만 수행. DL(1D-CNN/LSTM)은 확장 과제.
-- **누수 방지:** IP, 포트, 타임스탬프는 피처에서 제외. train/test는 PCAP 파일 단위로 분할.
+- **누수 방지:** IP, 포트, 타임스탬프는 피처에서 제외. train/test는 세션 단위(`session_id`, a/b 쌍을 묶음)로 분할.
+  실시간 정확도는 학습에서 뺀 held-out 세션에서만 계산한다 (ADR 0003 결정 6).
 - **중복 처리:** 고정 flow_id 기반 멱등 적재 (ClickHouse ReplacingMergeTree). Exactly-once는 주장하지 않는다.
 - **이상 징후:** 규칙 기반 알림. 검증은 replay 중 특정 트래픽을 인위적으로 증폭 주입하여 탐지 지연을 측정.
 - **실행 환경:** 단일 머신 docker-compose.
@@ -85,8 +91,7 @@ docs/              # 설계 결정 기록(ADR), 성능 실험 결과
     - 실시간 held-out = 오프라인 held-out 평가 (accuracy 0.746, macro-F1 0.701, 클래스별 일치). in-sample은 0.950이라 전체로 재면 약 0.2 부풀려짐
     - held-out 세션은 규칙으로 골라 세션 CV(0.52)보다 높게 나온다. 일반화 추정은 세션 CV가 더 보수적
     - 새 모델로 `verify_step3.py` 14/14, 누수 테스트 3/3 (docs/step3-streaming.md 11절)
-- [ ] 4단계 원본 보존·재처리 (설계 승인 대기, 아직 구현 없음)
-  - ADR 0004 시간 윈도우 집계 (상태: 제안): 중복 제거된 flows_raw 위 ClickHouse 조회 시점 집계 + dbt 권장.
-    **승인되면 위 "확정된 설계 결정"의 "Spark는 … 시간 윈도우 집계" 문구를 고친다**
-  - ADR 0005 원본 보존과 재처리 (상태: 제안): Spark 두 번째 스트리밍 쿼리(file sink) → MinIO Parquet, 재처리는 보존본 → Spark 배치 잡.
+- [ ] 4단계 원본 보존·재처리 (설계 채택, 구현 시작 전)
+  - ADR 0004 시간 윈도우 집계 (상태: 채택, 2026-11-04): 위 "확정된 설계 결정"에 반영함. 뷰 구현은 6단계 대시보드와 함께
+  - ADR 0005 원본 보존과 재처리 (상태: 채택, 2026-11-04): Spark 두 번째 스트리밍 쿼리(file sink) → MinIO Parquet, 재처리는 보존본 → Spark 배치 잡.
     시나리오 ① Kafka 소실 후 복구, ② 새 모델 재추론. 성공 기준은 ADR에 수치로 정의

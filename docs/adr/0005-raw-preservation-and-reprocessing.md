@@ -1,9 +1,32 @@
 # ADR 0005: 원본 보존(MinIO)과 재처리
 
 - 날짜: 2026-10-27
-- 상태: **제안**. 승인 전에는 구현하지 않는다. 새 서비스와 라이브러리(MinIO, Spark S3 커넥터)가 들어가므로 승인이 필요하다 (CLAUDE.md 작업 원칙 3).
+- 상태: **채택** (2026-11-04 승인). MinIO와 Spark S3 커넥터 추가도 승인받았다. 정확한 버전은 구현할 때 확인해서 이 문서에 적는다. 모델 업로드 도구(boto3 / mc)는 구현할 때 다시 묻는다.
 - 범위: 4단계 "MinIO 원본 보존, 장애 후 재처리 검증"
 - 관련: ADR 0002(flow_id, 멱등 적재), ADR 0003(품질 검사, 모델 직렬화, held-out), ADR 0004(집계)
+
+## 구현 전 확인 (2026-11-04): MinIO 이미지를 받을 수 없다 — 저장소 결정 대기
+
+승인 직후 버전을 확인하다가 다음 사실을 찾았다.
+- GitHub `minio/minio` 저장소가 **archived** 상태다. 마지막 릴리스는 `RELEASE.2025-10-15T17-29-55Z`(2025-10-16)다.
+- Docker Hub `minio/minio`는 저장소 조회가 404다.
+- `docker manifest inspect`로 `minio/minio`와 `quay.io/minio/minio` 모두 `latest`와 마지막 릴리스 태그가 조회되지 않는다.
+
+→ 이 ADR이 전제한 MinIO를 컨테이너로 쓸 수 없다. **S3 호환 저장소를 다시 고르는 결정이 필요하다** (승인 대기).
+아래 결정 1–4의 내용(무엇을, 누가, 어떤 형식으로, 재처리 경로, 성공 기준)은 S3 API에만 의존하므로 저장소를 바꿔도 그대로다.
+
+| 후보 (2026-11-04 확인) | 라이선스 | 최근 릴리스 | 이미지 | 메모 |
+|---|---|---|---|---|
+| SeaweedFS (`chrislusf/seaweedfs`) | Apache-2.0 | 4.52 (2026-11-02), 거의 매주 | 약 95–190 MB | 2014년경부터 개발, GitHub 별 약 3.6만. 한 컨테이너(`weed server -s3`)로 S3 게이트웨이까지 띄운다 |
+| RustFS (`rustfs/rustfs`) | Apache-2.0 | 1.0.4 (2026-10-25) | 115 MB | MinIO와 비슷한 API·콘솔. 1.0 정식이 2026-10 초라 아직 젊다 |
+| Garage (`dxflrs/garage`) | AGPL-3.0 | v2.5.0 (2026-10-24) | 27 MB | 가볍다. 소규모 분산용이고 S3 API를 일부만 지원한다. 처음 띄울 때 레이아웃 설정이 필요하다 |
+| Versity S3 Gateway (`versity/versitygw`) | Apache-2.0 | v1.10.0 (2026-10-22) | 36 MB | 로컬 파일시스템 위의 S3 게이트웨이. 단순하다 |
+| MinIO 소스 직접 빌드 | AGPL-3.0 | 2025-10 이후 없음 | — | 보안 업데이트가 없다. 권장하지 않는다 |
+
+**Spark S3 커넥터 (저장소와 무관하게 필요):**
+- Spark 4.1.3 이미지의 Hadoop은 **3.4.2**다 (`hadoop-client-api-3.4.2.jar`).
+- 필요한 jar: `hadoop-aws-3.4.2`(0.9 MB), `software.amazon.awssdk:bundle:2.29.52`(**642 MB**, hadoop-project 3.4.2 기준 버전), `analyticsaccelerator-s3:1.2.1`.
+- SDK bundle 때문에 Spark 이미지가 2.80 GB → 약 3.45 GB로 커진다. 개별 SDK 모듈만 고르면 작아지지만, 의존성을 맞추다 실수할 위험이 크다.
 
 ## 문제
 
