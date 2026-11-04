@@ -4,6 +4,7 @@
     python src/replay/producer.py --limit 1000 --speed 1
     python src/replay/producer.py --speed 10 --loop 3 --run-id-in-hash     # 부하 테스트
     python src/replay/producer.py --speed 100 --inject-faults 0.01         # 품질 검사 검증 (faults.py)
+    python src/replay/producer.py --rate 5000 --duration 240               # 일정 속도 부하 (ADR 0006)
 
 재생 규칙
 - 입력: 필터 전 data/flows/*.parquet 전체 (배경 트래픽 필터는 파이프라인 안에서 한다)
@@ -100,11 +101,24 @@ def main() -> None:
     parser.add_argument("--inject-faults", type=float, default=0.0,
                         help="정상 메시지 하나당 망가뜨린 메시지를 추가로 보낼 확률 (0 = 끔). 품질 검사 검증용")
     parser.add_argument("--fault-seed", type=int, default=42)
+    parser.add_argument("--rate", type=float, default=None,
+                        help="일정 속도 모드: 타임라인을 무시하고 초당 N건을 고르게 보낸다 (부하 테스트, ADR 0006 결정 1)")
+    parser.add_argument("--duration", type=float, default=None,
+                        help="일정 속도 모드에서 보내는 시간(초). 데이터가 끝나면 처음부터 반복한다")
     args = parser.parse_args()
     if args.speed <= 0:
         parser.error("--speed는 0보다 커야 한다")
     if not 0 <= args.inject_faults <= 1:
         parser.error("--inject-faults는 0과 1 사이여야 한다")
+    if args.duration is not None and args.rate is None:
+        parser.error("--duration은 --rate와 함께 쓴다")
+    if args.rate is not None:
+        if args.rate <= 0:
+            parser.error("--rate는 0보다 커야 한다")
+        # 반복 재생하므로 회차마다 새 flow_id가 필요하다 (같은 flow_id면 중복 제거되어 부하로 세지 않는다)
+        args.run_id_in_hash = True
+        if args.duration is not None:
+            args.loop = 0
 
     run_id = args.run_id or datetime.now().strftime("%Y%m%dT%H%M%S")
 
@@ -115,7 +129,7 @@ def main() -> None:
     rows = df.to_dict("records")
     print(f"loaded {len(rows):,} flows ({len(features)} features) in {time.perf_counter() - t_load:.1f}s | "
           f"run_id={run_id} speed={args.speed} loop={args.loop} run_id_in_hash={args.run_id_in_hash} "
-          f"inject_faults={args.inject_faults}")
+          f"inject_faults={args.inject_faults} rate={args.rate} duration={args.duration}")
     rng = random.Random(args.fault_seed)
     f2_rows = [r for r in rows if r["f2_pass"]]   # soft 오류는 F2 통과 행으로 만든다 (추론에서 빠지는지 확인)
     injected = Counter()
@@ -144,50 +158,70 @@ def main() -> None:
         else:
             delivered[msg.partition()] += 1
 
+    def produce(key: str, value: str, headers=None) -> None:
+        while True:
+            try:
+                producer.produce(args.topic, key=key, value=value, headers=headers, on_delivery=on_delivery)
+                break
+            except BufferError:  # 로컬 송신 큐가 가득 참 → 전송 완료를 기다렸다가 재시도
+                producer.poll(0.1)
+        producer.poll(0)
+
+    def send(row: dict, loop_idx: int, event_time_ms: int) -> int:
+        """정상 메시지 하나 (+ 확률에 따라 오류 주입 메시지 하나)를 보낸다. 보낸 메시지 수를 돌려준다."""
+        flow_id = run_flow_id(row["flow_id"], run_id, loop_idx) if args.run_id_in_hash else row["flow_id"]
+        msg = build_message(row, features, flow_id, run_id, loop_idx, event_time_ms=event_time_ms)
+        msg["ts"]["replay_sent_ms"] = int(time.time() * 1000)
+        produce(str(flow_id), json.dumps(msg))
+        if not (args.inject_faults and rng.random() < args.inject_faults):
+            return 1
+        fault = rng.choice(FAULT_TYPES)
+        base = rng.choice(f2_rows) if fault in SOFT_TYPES and f2_rows else row
+        fault_id = run_flow_id(base["flow_id"], f"{run_id}:fault:{fault}", sum(injected.values()))
+        fmsg = build_message(base, features, fault_id, run_id, loop_idx, event_time_ms=event_time_ms)
+        fmsg["ts"]["replay_sent_ms"] = int(time.time() * 1000)
+        produce(str(fault_id), corrupt(fmsg, fault), headers=[(FAULT_HEADER, fault.encode())])
+        injected[fault] += 1
+        return 2
+
     sent = 0
+    normal = 0
     loop_idx = 0
+    print(f"send_start_ms={int(time.time() * 1000)}", flush=True)   # 부하 테스트의 정상 구간 기준 (데이터 로딩 뒤)
     t_start = time.monotonic()
     try:
-        while args.loop == 0 or loop_idx < args.loop:
-            base_wall_ms = int(time.time() * 1000)
-            base_mono = time.monotonic()
-            first_offset = rows[0]["offset_ms"]
-            for row in rows:
-                rel_s = (row["offset_ms"] - first_offset) / 1000 / args.speed
-                wait = base_mono + rel_s - time.monotonic()
-                if wait > 0:
-                    time.sleep(wait)
-
-                flow_id = run_flow_id(row["flow_id"], run_id, loop_idx) if args.run_id_in_hash else row["flow_id"]
-                msg = build_message(row, features, flow_id, run_id, loop_idx,
-                                    event_time_ms=base_wall_ms + int(rel_s * 1000))
-                msg["ts"]["replay_sent_ms"] = int(time.time() * 1000)
-                while True:
-                    try:
-                        producer.produce(args.topic, key=str(flow_id), value=json.dumps(msg), on_delivery=on_delivery)
+        if args.rate is not None:
+            # 일정 속도 모드: k번째 정상 메시지를 t_start + k / rate에 보낸다. 2 ms 이상 앞설 때만 멈춘다
+            # (메시지마다 sleep하면 sleep 정밀도 때문에 목표보다 느려진다)
+            interval = 1.0 / args.rate
+            stop_at = t_start + args.duration if args.duration is not None else float("inf")
+            done = False
+            while not done and (args.loop == 0 or loop_idx < args.loop):
+                for row in rows:
+                    now = time.monotonic()
+                    if now >= stop_at:
+                        done = True
                         break
-                    except BufferError:  # 로컬 송신 큐가 가득 참 → 전송 완료를 기다렸다가 재시도
-                        producer.poll(0.1)
-                producer.poll(0)
-                sent += 1
-
-                if args.inject_faults and rng.random() < args.inject_faults:
-                    fault = rng.choice(FAULT_TYPES)
-                    base = rng.choice(f2_rows) if fault in SOFT_TYPES and f2_rows else row
-                    fault_id = run_flow_id(base["flow_id"], f"{run_id}:fault:{fault}", sum(injected.values()))
-                    fmsg = build_message(base, features, fault_id, run_id, loop_idx,
-                                         event_time_ms=base_wall_ms + int(rel_s * 1000))
-                    fmsg["ts"]["replay_sent_ms"] = int(time.time() * 1000)
-                    while True:
-                        try:
-                            producer.produce(args.topic, key=str(fault_id), value=corrupt(fmsg, fault),
-                                             headers=[(FAULT_HEADER, fault.encode())], on_delivery=on_delivery)
-                            break
-                        except BufferError:
-                            producer.poll(0.1)
-                    injected[fault] += 1
-                    sent += 1
-            loop_idx += 1
+                    ahead = t_start + normal * interval - now
+                    if ahead > 0.002:
+                        time.sleep(ahead)
+                    sent += send(row, loop_idx, event_time_ms=int(time.time() * 1000))
+                    normal += 1
+                else:
+                    loop_idx += 1
+        else:
+            while args.loop == 0 or loop_idx < args.loop:
+                base_wall_ms = int(time.time() * 1000)
+                base_mono = time.monotonic()
+                first_offset = rows[0]["offset_ms"]
+                for row in rows:
+                    rel_s = (row["offset_ms"] - first_offset) / 1000 / args.speed
+                    wait = base_mono + rel_s - time.monotonic()
+                    if wait > 0:
+                        time.sleep(wait)
+                    sent += send(row, loop_idx, event_time_ms=base_wall_ms + int(rel_s * 1000))
+                    normal += 1
+                loop_idx += 1
     except KeyboardInterrupt:
         print("interrupted")
     finally:
@@ -195,11 +229,15 @@ def main() -> None:
         remaining = producer.flush(30)
     t_end = time.monotonic()
 
-    expected = (rows[-1]["offset_ms"] - rows[0]["offset_ms"]) / 1000 / args.speed if rows else 0
     send_s = t_send_done - t_start
     print(f"sent {sent:,} | delivered {sum(delivered.values()):,} | failed {len(failed)} | unflushed {remaining}")
-    print(f"send loop {send_s:.2f}s (expected per loop {expected:.2f}s = timeline span ÷ speed, loops {loop_idx}) | "
-          f"final flush {t_end - t_send_done:.2f}s | {sent / send_s if send_s > 0 else 0:,.0f} msg/s")
+    if args.rate is not None:
+        print(f"send loop {send_s:.2f}s (rate mode: target {args.rate:,.0f} msg/s, achieved {normal / send_s if send_s > 0 else 0:,.0f} "
+              f"normal msg/s, passes {loop_idx}) | final flush {t_end - t_send_done:.2f}s | {sent / send_s if send_s > 0 else 0:,.0f} msg/s")
+    else:
+        expected = (rows[-1]["offset_ms"] - rows[0]["offset_ms"]) / 1000 / args.speed if rows else 0
+        print(f"send loop {send_s:.2f}s (expected per loop {expected:.2f}s = timeline span ÷ speed, loops {loop_idx}) | "
+              f"final flush {t_end - t_send_done:.2f}s | {sent / send_s if send_s > 0 else 0:,.0f} msg/s")
     print("per partition:", dict(sorted(delivered.items())))
     if args.inject_faults:
         print(f"injected {sum(injected.values()):,} (normal {sent - sum(injected.values()):,}):",

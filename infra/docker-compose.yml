@@ -115,8 +115,8 @@ services:
       KAFKA_BOOTSTRAP: kafka:9092
       KAFKA_TOPIC: flows.raw
       CHECKPOINT_DIR: /checkpoints/flows_raw
-      TRIGGER_INTERVAL: 5 seconds
-      MAX_OFFSETS_PER_TRIGGER: "50000"
+      TRIGGER_INTERVAL: ${TRIGGER_INTERVAL:-5 seconds}              # 튜닝 실험은 환경 변수로 덮어쓴다 (ADR 0006)
+      MAX_OFFSETS_PER_TRIGGER: "${MAX_OFFSETS_PER_TRIGGER:-50000}"
       CLICKHOUSE_URL: jdbc:clickhouse://clickhouse:8123/capstone
       CLICKHOUSE_TABLE: capstone.flows_raw
       CLICKHOUSE_USER: ${CLICKHOUSE_USER:-capstone}
@@ -130,7 +130,7 @@ services:
       S3_SECRET_KEY: capstone-dev-secret
       ARCHIVE_PATH: s3a://capstone-raw/flows.raw
       ARCHIVE_CHECKPOINT_DIR: /checkpoints/archive
-      ARCHIVE_TRIGGER_INTERVAL: 1 minute
+      ARCHIVE_TRIGGER_INTERVAL: ${ARCHIVE_TRIGGER_INTERVAL:-1 minute}
     volumes:
       - ../src:/opt/app/src:ro
       - ../models:/opt/app/models:ro
