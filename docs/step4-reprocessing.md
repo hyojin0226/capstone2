@@ -9,7 +9,7 @@
 | SeaweedFS 서비스, Spark S3A 커넥터 | 완료 (아래 2) |
 | 원본 보존 쿼리 (Spark file sink → S3 Parquet) | 완료 (아래 3) |
 | 보존본 완전성 검증 | **통과** (아래 4) |
-| 시나리오 ① Kafka 소실 후 복구 | 아직 없음 |
+| 시나리오 ① Kafka 소실 후 복구 | **통과** (아래 7) |
 | 시나리오 ② 새 모델 재추론 | 아직 없음 |
 | 모델 산출물 업로드 | 아직 없음 (도구 결정 대기) |
 
@@ -148,7 +148,72 @@ archive: 6 parquet files, 1 dt/hr partitions, path s3a://capstone-raw/flows.raw
 | kafka | 1.8 GiB / 2 GiB | 페이지 캐시 포함 |
 | clickhouse | 482 MiB / 3 GiB | |
 
+## 7. 시나리오 ①: Kafka 원본 소실 후 S3 보존본에서 복구 (2026-11-04)
+
+```bash
+bash infra/scripts/scenario1_recovery.sh
+```
+
+### 구성
+
+- **재처리 잡** `src/reprocess/reprocess_archive.py`
+  - 보존본을 Spark로 읽고, Kafka 소스와 같은 컬럼 이름으로 맞춘다 (`kafka_timestamp` → `timestamp`).
+  - 그다음 **스트리밍 잡의 `parse()`와 `make_write_batch()`를 그대로** 호출한다. 처리 코드는 한 벌이다.
+  - 원문이 행당 약 2 KB라서, 파티션별 offset 2만 개 단위(배치당 약 6만 행)로 나눠 처리한다.
+  - `pipeline_batches`의 batch_id는 1,000,000부터 매긴다. 스트리밍 배치(0부터)와 섞이지 않게 하기 위해서다.
+  - `--dt`, `--hr` 옵션으로 기간 일부만 재처리할 수 있다 (부분 복구용. 아직 검증하지 않았다).
+- **지문** `infra/scripts/table_fingerprint.py`
+  - 행마다 `cityHash64(결정적 컬럼 전부)`를 계산한다. `flows_raw`는 flow_id별, `flows_rejected`는 Kafka 위치별이고, 둘 다 FINAL로 읽는다.
+  - 결정적 컬럼 = 저장 컬럼 중 처리 시각(`spark_processed_ms`, `inserted_at`)과 ALIAS·MATERIALIZED 컬럼을 뺀 것이다.
+  - 같은 상태를 스냅샷하고 바로 비교하면 차이 0인 것을 먼저 확인했다.
+- **실행 스크립트** `infra/scripts/scenario1_recovery.sh`: 아래 절차를 한 번에 실행한다.
+
+### 절차와 결과
+
+| 단계 | 내용 | 결과 |
+|---|---|---|
+| 1. 기준 데이터 | `archive_test.sh`: 초기화 → 정상 364,054 + 오류 주입 3,701 (seed 42) 재생 → 적재·보존 완료 | `verify_step3` 14/14, `verify_archive` 4/4 |
+| 2. 스냅샷 | 행별 지문 저장 | flows_raw 365,965 / flows_rejected 1,790 / 추론 8,758 |
+| 3. Kafka 원본 소실 | `kafka-delete-records`로 3개 파티션의 log start offset을 끝으로 옮긴다 (보존 기간 만료 후와 같은 상태) | earliest = latest = (122725, 122670, 122360). `--from-beginning`으로 읽히는 메시지 **0건** |
+| 4. ClickHouse 결과 소실 | `flows_raw`, `flows_rejected`, `pipeline_batches` TRUNCATE | 0행 / 0행 |
+| 5. 재처리 | `reprocess_archive.py` (같은 모델 `xgb-20261027-1cc0f57c`) | 7개 배치, 367,755건, **116초** (컨테이너 포함 131초) |
+| 6. 비교 | 아래 표 | 전부 통과 |
+
+```
+[batch 1000000] rows=60000 written=59700 rejected=300 flagged=319 inferred=5825 injected=619 took=16.28s
+...
+[batch 1000006] rows=7755 written=7725 rejected=30 flagged=36 inferred=53 injected=66 took=7.79s
+reprocess done: 367,755 records in 115.9s (7 chunks), model xgb-20261027-1cc0f57c
+```
+
+### 성공 기준 (ADR 0005 시나리오 ①)
+
+| 구분 | 항목 | 기준 | 결과 |
+|---|---|---|---|
+| 보존본 완전성 | 레코드 수 / 고유 위치 / offset 누락 / value 바이트 | 367,755 / 367,755 / 0 / 불일치 0 | **통과** (4/4, 전량 비교) |
+| 복구 행 수 | `flows_raw` 고유 flow_id | 365,965 | **365,965** |
+| | `flows_rejected` 고유 위치 | 1,790 | **1,790** |
+| | 회계 | 367,755 = 365,965 + 1,790 | **일치** |
+| | `inferred` | 8,758 | **8,758** |
+| 중복 | `count() FINAL` = 고유 키 수 | 세 테이블 | flows_raw 365,965 = 365,965, flows_rejected 1,790 = 1,790 |
+| | OPTIMIZE 후 중복 | 0 | **0 / 0** |
+| 결과 일치 | 결정적 컬럼 지문, 스냅샷 대비 | 불일치 0 | **0 / 365,965, 0 / 1,790** (예측 클래스·확률 포함) |
+| | `verify_step3.py` | 14/14 | **14/14** |
+| | `realtime_holdout_accuracy` | accuacy 0.7461, macro-F1 0.7014 | **같음** |
+| 시간 | 재처리 소요 | 목표안 5분 이내 | **116초** |
+
+### 해석
+
+- **Kafka에 원본이 하나도 없는 상태에서, S3 보존본만으로 ClickHouse 결과를 행 단위·비트 단위로 똑같이 다시 만들었다.**
+- 원래 Kafka 위치를 그대로 쓰므로 `flows_rejected`도 같은 키로 복구된다. 깨진 메시지 원문까지 같다.
+- `pipeline_batches`는 배치 경계가 다르므로(스트리밍 14개 vs 재처리 7개) 지문 비교에서 뺐다. 합계는 `verify_step3` 6번 항목에서 맞는 것을 확인했다.
+- **재처리 처리량:** 스트리밍 배치(5만 행에 약 2.5초)보다 느리다 (6만 행에 13–25초). 추정 원인은 세 가지다.
+  - 배치 컨테이너(드라이버 2 GB)가 스트리밍 Spark와 CPU를 나눠 쓴다.
+  - 덩어리마다 보존본 전체를 다시 스캔하고 filter한다.
+  - 추론 Python worker를 새로 띄운다.
+  - 5단계에서 개선을 검토한다 (예: dt/hr 파티션 단위 처리, 스캔 1회 후 repartition).
+
 ## 다음
 
-- 시나리오 ① (Kafka 소실 후 S3 보존본에서 복구), 시나리오 ② (새 모델 재추론): 재처리 배치 잡 `src/reprocess/`.
-- 모델 산출물 업로드 도구 결정 (boto3 / `weed` 명령 / Spark S3A).
+- 시나리오 ② (새 모델 재추론). `flow_predictions` 테이블, 모델 B, 모델 업로드 도구(boto3 / `weed` 명령 / Spark S3A) 결정이 필요하다.
+- 부분 복구(`--dt/--hr`) 검증은 선택 과제다.

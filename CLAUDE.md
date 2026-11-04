@@ -101,5 +101,8 @@ docs/              # 설계 결정 기록(ADR), 성능 실험 결과
   - [x] 운영 안정화: 인프라 `restart: unless-stopped`, reset 스크립트 시간 제한·오류 표시, replay 브로커 확인
     - **WSL이 wsl.exe 클라이언트가 없으면 배포판을 종료한다** (2026-11-04 두 번 관측). 긴 실행 중에는 Ubuntu 터미널을 열어 두거나 `wsl.exe -d Ubuntu -- sleep infinity`를 띄워 둔다
     - 알려진 위험: seaweedfs 454 / 512 MiB, spark 4.08 / 5 GiB
-  - [ ] 시나리오 ① Kafka 소실 후 복구, ② 새 모델 재추론 (`src/reprocess/`)
+  - [x] 시나리오 ① Kafka 소실 후 복구 (`infra/scripts/scenario1_recovery.sh`, `src/reprocess/reprocess_archive.py`)
+    - Kafka에서 레코드를 모두 지우고(읽히는 메시지 0) ClickHouse를 비운 뒤, S3 보존본만으로 116초에 복구
+    - 365,965 / 1,790 / 추론 8,758 그대로, OPTIMIZE 후 중복 0, 행별 지문 불일치 0, verify_step3 14/14 (docs/step4-reprocessing.md 7절)
+  - [ ] 시나리오 ② 새 모델 재추론 (flow_predictions 테이블, 모델 B)
   - [ ] 모델 산출물 업로드 (도구 결정 대기)

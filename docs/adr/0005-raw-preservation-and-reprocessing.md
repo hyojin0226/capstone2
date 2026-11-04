@@ -136,6 +136,11 @@
 | | `realtime_holdout_accuracy` | 스냅샷과 같음 (accuracy 0.7461, macro-F1 0.7014) |
 | 시간 (기록용) | 재처리 배치 잡 소요 시간 | 측정해서 기록한다. 목표안: 5분 이내 |
 
+**결과 (2026-11-04): 전부 통과.**
+- 보존본 4/4, 복구 365,965 / 1,790 / 추론 8,758, OPTIMIZE 후 중복 0, 지문 불일치 0
+- `verify_step3` 14/14, 재처리 116초
+- 상세: docs/step4-reprocessing.md 7절, 재현: `infra/scripts/scenario1_recovery.sh`
+
 **확장 (선택):** 일부 기간만 잃은 경우. `event_time` 1시간 범위의 행만 지우고, 해당 `dt/hr` 파티션만 재처리한다.
 그 범위 행만 복구되고 다른 행은 바뀌지 않아야 한다 (범위 밖 해시 불일치 0, OPTIMIZE 후 중복 0).
 

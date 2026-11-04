@@ -292,3 +292,28 @@ WSL은 붙어 있는 wsl.exe 클라이언트가 없으면 Ubuntu 배포판을 �
 ```bash
 wsl.exe -d Ubuntu -- sleep infinity
 ```
+
+## 8. 재처리 시나리오 ① (Kafka 소실 후 S3 보존본에서 복구)
+
+기준 데이터를 재생한 뒤, Kafka 레코드를 모두 지우고 ClickHouse를 비운다. 그다음 S3 보존본만으로 다시 만들고 소실 전과 비교한다.
+**토픽·테이블·보존본을 초기화하고 Kafka 레코드를 지우므로** 남겨야 할 데이터가 있으면 실행하지 않는다. 결과: docs/step4-reprocessing.md 7절.
+
+```bash
+bash infra/scripts/scenario1_recovery.sh
+```
+
+재처리 잡만 따로 실행 (보존본 → 같은 처리 코드 → ClickHouse):
+
+```bash
+bash infra/scripts/spark_batch.sh reprocess/reprocess_archive.py
+```
+
+결과 테이블 지문 저장과 비교:
+
+```bash
+python infra/scripts/table_fingerprint.py snapshot /tmp/snap
+```
+
+```bash
+python infra/scripts/table_fingerprint.py compare /tmp/snap
+```
