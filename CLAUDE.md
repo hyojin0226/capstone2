@@ -109,5 +109,6 @@ docs/              # 설계 결정 기록(ADR), 성능 실험 결과
     - `flow_predictions` (모델별 예측 이력, ClickHouse MV로 채움), held-out 정확도 뷰를 이력 기준으로 변경
     - 모델 B `xgb-20261104-0e0af510` (트리 500, 같은 held-out): 119 / 8,758건 예측 변경
     - 추론 행 모두 B, 이력 A·B 각 8,758, 예측 외 컬럼 지문 불일치 0, B = 오프라인 B, A 예측 보존, verify_step3 14/14, 101초 (docs/step4-reprocessing.md 9절)
-    - **지금 스트리밍 잡은 모델 B로 떠 있다** (`MODEL_VERSION=xgb-20261104-0e0af510`). compose 기본값은 여전히 A다
+    - **운영 기본 모델은 A로 유지한다** (2026-11-04 결정). 시나리오 ② 뒤에 스트리밍을 A로 되돌리고 과거 데이터도 보존본에서 A로 다시 추론했다 (98초).
+      verify_step3(A) 14/14. B 예측은 flow_predictions에 이력으로 남아 있다
   - 5단계로 넘길 항목: Spark 메모리 4.0/5 GiB, SeaweedFS 441–454/512 MiB, 재처리 처리량(6만 행 12–25초), E2E 지연(트리거 5초)
