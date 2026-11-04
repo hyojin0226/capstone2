@@ -199,7 +199,7 @@ reprocess done: 367,755 records in 115.9s (7 chunks), model xgb-20261027-1cc0f57
 | | OPTIMIZE 후 중복 | 0 | **0 / 0** |
 | 결과 일치 | 결정적 컬럼 지문, 스냅샷 대비 | 불일치 0 | **0 / 365,965, 0 / 1,790** (예측 클래스·확률 포함) |
 | | `verify_step3.py` | 14/14 | **14/14** |
-| | `realtime_holdout_accuracy` | accuacy 0.7461, macro-F1 0.7014 | **같음** |
+| | `realtime_holdout_accuracy` | accuracy 0.7461, macro-F1 0.7014 | **같음** |
 | 시간 | 재처리 소요 | 목표안 5분 이내 | **116초** |
 
 ### 해석
