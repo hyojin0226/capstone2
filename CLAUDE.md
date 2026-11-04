@@ -91,7 +91,7 @@ docs/              # 설계 결정 기록(ADR), 성능 실험 결과
     - 실시간 held-out = 오프라인 held-out 평가 (accuracy 0.746, macro-F1 0.701, 클래스별 일치). in-sample은 0.950이라 전체로 재면 약 0.2 부풀려짐
     - held-out 세션은 규칙으로 골라 세션 CV(0.52)보다 높게 나온다. 일반화 추정은 세션 CV가 더 보수적
     - 새 모델로 `verify_step3.py` 14/14, 누수 테스트 3/3 (docs/step3-streaming.md 11절)
-- [ ] 4단계 원본 보존·재처리 (진행 중). 구현 기록: docs/step4-reprocessing.md
+- [x] 4단계 원본 보존·재처리 (2026-11-04 완료, 부분 복구 `--dt/--hr` 검증은 선택 과제). 구현 기록: docs/step4-reprocessing.md
   - ADR 0004 시간 윈도우 집계 (상태: 채택, 2026-11-04): 위 "확정된 설계 결정"에 반영함. 뷰 구현은 6단계 대시보드와 함께
   - ADR 0005 원본 보존과 재처리 (상태: 채택, 2026-11-04): Spark 두 번째 스트리밍 쿼리(file sink) → SeaweedFS(S3) Parquet, 재처리는 보존본 → Spark 배치 잡.
     시나리오 ① Kafka 소실 후 복구, ② 새 모델 재추론. 성공 기준은 ADR에 수치로 정의
@@ -104,5 +104,10 @@ docs/              # 설계 결정 기록(ADR), 성능 실험 결과
   - [x] 시나리오 ① Kafka 소실 후 복구 (`infra/scripts/scenario1_recovery.sh`, `src/reprocess/reprocess_archive.py`)
     - Kafka에서 레코드를 모두 지우고(읽히는 메시지 0) ClickHouse를 비운 뒤, S3 보존본만으로 116초에 복구
     - 365,965 / 1,790 / 추론 8,758 그대로, OPTIMIZE 후 중복 0, 행별 지문 불일치 0, verify_step3 14/14 (docs/step4-reprocessing.md 7절)
-  - [ ] 시나리오 ② 새 모델 재추론 (flow_predictions 테이블, 모델 B)
-  - [ ] 모델 산출물 업로드 (도구 결정 대기)
+  - [x] 모델 산출물 업로드 (`infra/scripts/upload_model.sh`, `weed filer.copy`): 버전 디렉터리 불변(다른 내용이면 거부), 업로드 후 sha256 대조
+  - [x] 시나리오 ② 새 모델 재추론 (`infra/scripts/scenario2_reinference.sh`)
+    - `flow_predictions` (모델별 예측 이력, ClickHouse MV로 채움), held-out 정확도 뷰를 이력 기준으로 변경
+    - 모델 B `xgb-20261104-0e0af510` (트리 500, 같은 held-out): 119 / 8,758건 예측 변경
+    - 추론 행 모두 B, 이력 A·B 각 8,758, 예측 외 컬럼 지문 불일치 0, B = 오프라인 B, A 예측 보존, verify_step3 14/14, 101초 (docs/step4-reprocessing.md 9절)
+    - **지금 스트리밍 잡은 모델 B로 떠 있다** (`MODEL_VERSION=xgb-20261104-0e0af510`). compose 기본값은 여전히 A다
+  - 5단계로 넘길 항목: Spark 메모리 4.0/5 GiB, SeaweedFS 441–454/512 MiB, 재처리 처리량(6만 행 12–25초), E2E 지연(트리거 5초)

@@ -10,8 +10,8 @@
 | 원본 보존 쿼리 (Spark file sink → S3 Parquet) | 완료 (아래 3) |
 | 보존본 완전성 검증 | **통과** (아래 4) |
 | 시나리오 ① Kafka 소실 후 복구 | **통과** (아래 7) |
-| 시나리오 ② 새 모델 재추론 | 아직 없음 |
-| 모델 산출물 업로드 | 아직 없음 (도구 결정 대기) |
+| 시나리오 ② 새 모델 재추론 | **통과** (아래 9) |
+| 모델 산출물 업로드 (`weed`) | 완료 (아래 8) |
 
 ## 1. 저장소: MinIO → SeaweedFS 4.48 (2026-11-04)
 
@@ -213,7 +213,93 @@ reprocess done: 367,755 records in 115.9s (7 chunks), model xgb-20261027-1cc0f57
   - 추론 Python worker를 새로 띄운다.
   - 5단계에서 개선을 검토한다 (예: dt/hr 파티션 단위 처리, 스캔 1회 후 repartition).
 
+## 8. 모델 산출물 업로드 (`infra/scripts/upload_model.sh`)
+
+- **도구:** SeaweedFS 컨테이너 안의 `weed filer.copy` / `weed filer.cat` (2026-11-04 결정, 새 라이브러리 없음).
+  - 파일을 `docker cp`로 컨테이너에 넣은 뒤 filer 경로 `/buckets/capstone-models/<version>/`에 복사한다. 이 경로가 곧 S3 버킷 경로다.
+- **한 번 올린 버전은 바꾸지 않는다.** 같은 sha256이면 건너뛰고, 다르면 거부한다.
+- **확인:** 올린 뒤 다시 읽어 sha256을 대조한다.
+
+| 확인 | 결과 |
+|---|---|
+| 모델 A 업로드 | `model.json` 5,139,228 B, `metadata.json` 5,940 B, sha256 일치 |
+| 같은 내용으로 다시 실행 | `already uploaded (same sha256)` |
+| 같은 버전 이름에 내용을 바꾼 파일 | **거부** (`refuse: … versions are immutable`, exit 1). 저장된 파일은 그대로 |
+| 모델 B 업로드 | `model.json` 8,046,698 B, `metadata.json` 5,936 B, sha256 일치 |
+
+- 한계: SeaweedFS 전용 명령이다. 다른 S3 저장소로 옮기면 이 스크립트를 바꿔야 한다 (S3 표준 클라이언트를 쓰지 않은 대가).
+
+## 9. 시나리오 ②: 새 모델 버전으로 과거 데이터 재추론 (2026-11-04)
+
+```bash
+bash infra/scripts/scenario2_reinference.sh xgb-20261027-1cc0f57c xgb-20261104-0e0af510
+```
+
+### 준비
+
+- **모델 B `xgb-20261104-0e0af510`:** 모델 A와 같은 `holdout.json`, 같은 학습 데이터이고, 트리 수만 300 → 500이다.
+  - `export_model.py`에 `--n-estimators` 옵션을 추가했다.
+  - 오프라인 held-out: A accuracy 0.746 / macro-F1 0.701, B 0.748 / 0.701.
+- **`flow_predictions` (`006_flow_predictions.sql`):** 모델별 예측 이력. 키는 `(model_version, flow_id)`, ReplacingMergeTree.
+  - **ADR과 다른 점:** 스트리밍·재처리 잡이 직접 쓰지 않는다. ClickHouse MV(`flow_predictions_mv`)가 `flows_raw`에 들어오는 추론 행을 옮겨 적는다.
+    - Spark 코드를 바꾸지 않고 두 경로에 똑같이 적용된다.
+    - MV는 merge 전 insert 블록을 보지만, 값을 옮겨 적기만 하고 대상이 ReplacingMergeTree라서 중복이 들어와도 수렴한다.
+    - ADR 0004에서 피한 것은 sum을 쌓는 증분 MV다.
+  - MV를 만들기 전에 있던 모델 A의 예측은 `006_backfill_flow_predictions.sql`로 옮겼다 (8,758행).
+- **held-out 정확도 뷰를 `flow_predictions` 기준으로 바꿨다.** 그래서 재추론 뒤에도 모델별 정확도를 나란히 본다. 바꾼 직후 모델 A로 `verify_step3` 14/14를 확인했다.
+- `reset_pipeline.sh`가 `flow_predictions`도 비운다.
+
+### 절차
+
+| 단계 | 내용 | 결과 |
+|---|---|---|
+| 1. 전제 | 시나리오 ① 직후 상태 (모델 A 결과, S3 보존본) | 추론 8,758 모두 A, 이력 A 8,758 |
+| 2. 스냅샷 | 예측이 아닌 결정적 컬럼의 행별 지문, 모델 A 예측 | 365,965 / 1,790 행, A 예측 8,758 |
+| 3. 모델 업로드 | A, B를 `capstone-models`에, B의 held-out 목록 등록 | A는 이미 있음(같은 sha256), B 업로드, 17개 세션 등록 |
+| 4. 전환 | 스트리밍 잡을 B로 먼저 바꾼다 (`MODEL_VERSION=B`, 체크포인트 유지). 이후 들어오는 데이터도 B로 처리된다 | `model: xgb-20261104-0e0af510`, 두 쿼리 재시작 |
+| 5. 재추론 | S3 보존본 → `reprocess_archive.py` (B) | 367,755건, 7개 배치, **101초** (컨테이너 포함 115초) |
+| 6. 비교 | 아래 표 | 전부 통과 |
+
+### 성공 기준 (ADR 0005 시나리오 ②)
+
+| 구분 | 항목 | 기준 | 결과 |
+|---|---|---|---|
+| 행 수 | `flows_raw` 고유 flow_id / `flows_rejected` | 365,965 / 1,790 | **365,965 / 1,790** |
+| | `inferred` | 8,758 | **8,758** |
+| | `flows_raw` FINAL의 추론 행 `model_version` | B 8,758, A 0 | **B 8,758, A 0** |
+| | `flow_predictions` | A 8,758, B 8,758 | **A 8,758, B 8,758** |
+| 중복 | `flows_raw` `count() FINAL` | 365,965 | **365,965** (merge 전 `count()`는 731,930: 재추론이 모든 행을 다시 썼다) |
+| | OPTIMIZE 후 중복 (flows_raw / flows_rejected / flow_predictions) | 0 | **0 / 0 / 0** |
+| | `flow_predictions` 고유 (model_version, flow_id) | 17,516 = 행 수 | **17,516 = 17,516** |
+| 결과 일치 | 예측이 아닌 결정적 컬럼 지문 (재추론 전 대비) | 불일치 0 | **0 / 365,965, 0 / 1,790** |
+| | B 예측 vs 오프라인 B 예측 | 클래스 불일치 0, 확률 차이 0.0 | **0, 0.0** (8,758건, `verify_step3` 모델 B 기준) |
+| | A 예측 (`flow_predictions`) vs 재추론 전 | 불일치 0 | **0** (8,758행 바이트 단위 동일) |
+| | `realtime_holdout_accuracy` (B) | B의 오프라인 held-out 평가와 클래스별 일치 | **일치** (accuracy 0.748, macro-F1 0.7012) |
+| | `verify_step3.py` (B) | 14/14 | **14/14** |
+| | ADR 0004 집계 뷰 | 클래스별 합계 = B 예측 분포 | 미검증. 집계 뷰는 6단계에서 만든다. 대신 `flows_raw` FINAL의 추론 행이 모두 B이고 B 예측과 비트 단위로 같음을 확인했다 |
+| 시간 | 재추론 잡 | 기록 | **101초** |
+
+**모델별 실시간 held-out 정확도 (재추론 후, `realtime_holdout_accuracy`)**
+
+| 모델 | held-out 행 | 정답 | accuracy | macro-F1 |
+|---|---|---|---|---|
+| A `xgb-20261027-1cc0f57c` (300 trees) | 1,103 | 823 | 0.7461 | 0.7014 |
+| B `xgb-20261104-0e0af510` (500 trees) | 1,103 | 825 | 0.748 | 0.7012 |
+
+- 두 모델 모두 각자의 `metadata.holdout.offline_eval`과 같다.
+- **재추론이 실제로 값을 바꿨다:** 8,758건 중 **119건의 예측 클래스가 A와 B 사이에 다르다.** 그런데도 예측이 아닌 컬럼은 하나도 바뀌지 않았고, A의 예측은 이력에 그대로 남았다.
+
+### 해석
+
+- **예측만 바뀌고 나머지는 그대로다.** 재추론은 `flows_raw` 행 전체를 다시 쓴다 (merge 전 2배). 하지만 FINAL이 version이 큰 새 모델 행을 골라서, 예측 컬럼만 B로 바뀌고 나머지 컬럼은 비트 단위로 같다.
+- **옛 결과가 남는다.** `flow_predictions`에 모델별로 남으므로, 같은 held-out 세션으로 두 모델을 실시간 지표로 비교할 수 있다.
+- **전환 순서:** 스트리밍을 먼저 B로 바꾼 뒤 과거를 재추론했다. 그래서 전환 중에 새로 들어온 데이터가 A로 남는 구간이 생기지 않는다.
+
 ## 다음
 
-- 시나리오 ② (새 모델 재추론). `flow_predictions` 테이블, 모델 B, 모델 업로드 도구(boto3 / `weed` 명령 / Spark S3A) 결정이 필요하다.
-- 부분 복구(`--dt/--hr`) 검증은 선택 과제다.
+- 4단계 완료. 부분 복구(`--dt/--hr`) 검증은 선택 과제로 남긴다.
+- 5단계(부하·병목·튜닝)에 넘길 항목:
+  - Spark 메모리 (스트리밍 4.0 / 5 GiB, raw_value persist)
+  - SeaweedFS 메모리 (441–454 / 512 MiB)
+  - 재처리 처리량 (6만 행에 12–25초)
+  - E2E 지연 (트리거 5초)

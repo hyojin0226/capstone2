@@ -317,3 +317,33 @@ python infra/scripts/table_fingerprint.py snapshot /tmp/snap
 ```bash
 python infra/scripts/table_fingerprint.py compare /tmp/snap
 ```
+
+## 9. 모델 업로드와 재처리 시나리오 ② (새 모델 재추론)
+
+모델 산출물을 S3 `capstone-models/<version>/`에 올린다 (`weed filer.copy`). 한 번 올린 버전은 바꿀 수 없다.
+
+```bash
+bash infra/scripts/upload_model.sh models/xgb-20261027-1cc0f57c
+```
+
+`flow_predictions`(모델별 예측 이력)와 MV, 이력 기준 held-out 정확도 뷰 (`006`). MV를 만들기 전의 예측은 backfill로 옮긴다:
+
+```bash
+docker exec clickhouse clickhouse-client --user capstone --password capstone-dev --queries-file /schema/006_flow_predictions.sql
+```
+
+```bash
+docker exec clickhouse clickhouse-client --user capstone --password capstone-dev --queries-file /schema/006_backfill_flow_predictions.sql
+```
+
+새 모델로 과거 데이터 재추론 (모델 A로 처리된 결과와 S3 보존본이 있어야 한다):
+
+```bash
+bash infra/scripts/scenario2_reinference.sh xgb-20261027-1cc0f57c xgb-20261104-0e0af510
+```
+
+모델별 실시간 held-out 정확도:
+
+```bash
+docker exec clickhouse clickhouse-client --user capstone --password capstone-dev -q "SELECT model_version, sum(support) AS n_rows, sum(correct) AS n_correct, round(n_correct / n_rows, 4) AS accuracy, round(avg(f1), 4) AS macro_f1 FROM capstone.realtime_holdout_accuracy GROUP BY model_version"
+```

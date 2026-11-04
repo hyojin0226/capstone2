@@ -74,6 +74,8 @@ def main() -> None:
     parser.add_argument("--data", type=Path, default=Path("data/dataset/flows_labeled.parquet"))
     parser.add_argument("--holdout", type=Path, default=Path("src/model/holdout.json"))
     parser.add_argument("--out-dir", type=Path, default=Path("models"))
+    parser.add_argument("--n-estimators", type=int, default=None,
+                        help="트리 수를 baseline(300)과 다르게 할 때 (예: 재추론 시나리오의 모델 B)")
     args = parser.parse_args()
 
     df = pd.read_parquet(args.data).reset_index(drop=True)
@@ -92,6 +94,8 @@ def main() -> None:
     # 1. held-out 세션을 뺀 clean 행으로 학습
     X = df.loc[train, features]
     model = make_model(len(classes))
+    if args.n_estimators is not None:
+        model.set_params(n_estimators=args.n_estimators)
     model.fit(X, y[train], sample_weight=compute_sample_weight("balanced", y[train]))
     booster = model.get_booster()
     assert booster.feature_names == features, "booster 피처 순서가 선택한 피처와 다르다"
