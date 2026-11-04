@@ -8,6 +8,7 @@
   3. 나머지: soft 품질 플래그(quality_ok, quality_flags), F2 표시(f2_passed)
   4. f2_passed AND quality_ok 행만 XGBoost 추론 (inference.py)
   5. flows_raw에 쓰고, 배치 지표를 pipeline_batches에 쓴다
+같은 앱 안에서 원본 보존 쿼리(archive.py)도 함께 돈다: Kafka 레코드 원본 → S3(SeaweedFS) Parquet
 
 at-least-once: 장애 후 같은 배치가 다시 실행될 수 있다. 세 테이블 모두 ReplacingMergeTree이고 키가 결정적이라 중복이 정리된다.
 
@@ -27,6 +28,7 @@ from pyspark.sql.types import (BooleanType, DoubleType, FloatType, IntegerType, 
                                StructType)
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from archive import s3a_conf, start_archive_query  # noqa: E402
 from f2_filter import is_background  # noqa: E402
 from inference import MODEL_DIR, add_predictions, load_metadata  # noqa: E402
 from quality import add_quality_flags, reject_reason  # noqa: E402
@@ -190,9 +192,8 @@ def main() -> None:
     print(f"model: {meta['model_version']} (xgboost {meta['xgboost_version']}, {len(meta['features'])} features) "
           f"from {MODEL_DIR}", flush=True)
 
-    spark = (SparkSession.builder.appName("flows_to_clickhouse")
-             .config("spark.sql.shuffle.partitions", "3")
-             .getOrCreate())
+    spark = s3a_conf(SparkSession.builder.appName("flows_to_clickhouse")
+                     .config("spark.sql.shuffle.partitions", "3")).getOrCreate()
     spark.sparkContext.setLogLevel("WARN")
 
     raw = (spark.readStream.format("kafka")
@@ -211,7 +212,10 @@ def main() -> None:
              .start())
     print(f"started: {TOPIC} → flows_raw / flows_rejected / pipeline_batches | checkpoint={CHECKPOINT} "
           f"trigger={TRIGGER} maxOffsetsPerTrigger={MAX_OFFSETS_PER_TRIGGER}", flush=True)
-    query.awaitTermination()
+
+    # 원본 보존 쿼리 (ADR 0005). 적재 쿼리와 독립: Kafka를 따로 읽고 체크포인트도 따로 둔다
+    start_archive_query(spark, KAFKA_BOOTSTRAP, TOPIC)
+    spark.streams.awaitAnyTermination()   # 둘 중 하나라도 실패하면 앱이 끝난다 (조용히 한쪽만 멈추지 않게)
 
 
 if __name__ == "__main__":

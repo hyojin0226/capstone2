@@ -46,7 +46,7 @@ models/<model_version>/
 - `created_at`
 
 **저장 위치:** `models/`는 git에서 제외한다 (산출물이라서). Spark 컨테이너에는 읽기 전용으로 마운트한다.
-4단계에서 MinIO에 원본과 함께 보존한다.
+4단계에서 S3 저장소(SeaweedFS, ADR 0005)에 원본과 함께 보존한다.
 
 ## 결정 2. 학습·추론 런타임 버전 맞추기
 
@@ -127,7 +127,7 @@ XGBoost는 "새 버전이 옛 모델을 읽는 것"만 보장하고, 반대 방�
 
 | 대안 | 장점 | 단점 |
 |---|---|---|
-| **A. ClickHouse `flows_rejected` 테이블 (채택)** | 대시보드에서 바로 세고 원인별로 볼 수 있다. 추가 토픽이 없다 | 다시 처리하려면 원문을 꺼내 다시 보내야 한다 (원문은 Kafka와 4단계 MinIO에도 있다) |
+| **A. ClickHouse `flows_rejected` 테이블 (채택)** | 대시보드에서 바로 세고 원인별로 볼 수 있다. 추가 토픽이 없다 | 다시 처리하려면 원문을 꺼내 다시 보내야 한다 (원문은 Kafka와 4단계 S3 보존본에도 있다) |
 | B. Kafka DLQ 토픽 `flows.dlq` | 다시 처리하기 쉽다 (토픽을 다시 읽으면 된다) | 들여다보려면 consumer가 필요하다. 모니터링에 별도 수집이 필요하다 |
 
 - 컬럼: Kafka 원문(`raw_value` String), `reason`, `kafka_partition`, `kafka_offset`, `kafka_timestamp_ms`, `spark_processed_ms`

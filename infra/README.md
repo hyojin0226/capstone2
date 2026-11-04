@@ -254,3 +254,41 @@ python infra/scripts/verify_step3.py --replay-log /tmp/replay.log
 ```bash
 PRODUCER_ARGS="--inject-faults 0.01" bash infra/scripts/failure_test.sh 50 100000 15
 ```
+
+## 7. 원본 보존 (SeaweedFS S3, ADR 0005)
+
+| 서비스 | 이미지 | 호스트 포트 (127.0.0.1) | 메모리 한도 |
+|---|---|---|---|
+| seaweedfs | `chrislusf/seaweedfs:4.48` (`weed mini`, MinIO 대체) | 8333 (S3 API) | 512 MB |
+
+- 버킷 `capstone-raw`, `capstone-models`는 시작할 때 만들어진다. 접근 키는 `infra/seaweedfs/s3.json`(로컬 개발용)에 있다.
+- Spark 앱 안의 보존 쿼리가 `s3a://capstone-raw/flows.raw/dt=…/hr=…/`에 1분마다 Parquet(zstd)을 쓴다. 체크포인트는 `/checkpoints/archive`다.
+- 보존본은 Spark로 읽는다. file sink의 `_spark_metadata`를 따라 커밋된 파일만 읽어야 하기 때문이다.
+
+버킷 확인:
+
+```bash
+echo "s3.bucket.list" | docker exec -i seaweedfs weed shell -master=localhost:9333
+```
+
+보존본 검증 (Kafka와 전량 대조, 일회용 Spark 배치 컨테이너):
+
+```bash
+bash infra/scripts/spark_batch.sh reprocess/verify_archive.py
+```
+
+초기화 → 재생 → 적재 검증 → 보존본 검증을 한 번에:
+
+```bash
+bash infra/scripts/archive_test.sh 100
+```
+
+### WSL 배포판 종료 주의
+
+WSL은 붙어 있는 wsl.exe 클라이언트가 없으면 Ubuntu 배포판을 종료할 수 있다 (2026-11-04 두 번 관측, docs/step4-reprocessing.md 5-2).
+그러면 컨테이너가 모두 멈춘다. kafka, clickhouse, seaweedfs는 `restart: unless-stopped`로 다시 뜬다. spark는 다시 띄워야 한다.
+긴 실행 중에는 Ubuntu 터미널을 열어 두거나, Windows 쪽에서 아래 명령을 띄워 둔다.
+
+```bash
+wsl.exe -d Ubuntu -- sleep infinity
+```

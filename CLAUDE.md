@@ -3,7 +3,7 @@
 ## 프로젝트 한 줄 요약
 공개 암호화 트래픽 PCAP에서 NFStream으로 플로우를 추출하고, 이를 실시간처럼 replay하여
 Kafka → Spark Structured Streaming → ClickHouse → dbt → Grafana로 흘려보내는 데이터 엔지니어링 파이프라인.
-원본은 MinIO에 보존하여 재처리 가능하게 한다. 핵심 성과는 모델 정확도가 아니라
+원본은 S3 호환 저장소(SeaweedFS. 처음 계획은 MinIO였으나 배포 중단으로 교체, ADR 0005)에 보존하여 재처리 가능하게 한다. 핵심 성과는 모델 정확도가 아니라
 **처리량, E2E latency, 데이터 신뢰성(중복/재처리), 모니터링**이다.
 
 ## 확정된 설계 결정
@@ -12,7 +12,7 @@ Kafka → Spark Structured Streaming → ClickHouse → dbt → Grafana로 흘�
 - **시간 윈도우 집계 (ADR 0004, 2026-11-04 변경):** Spark가 아니라 ClickHouse가 중복 제거된 flows_raw(FINAL) 위에서
   조회 시점 뷰로 집계한다 (대시보드·알림). 이력·분석은 dbt. Spark 상태 집계와 증분 sum MV는 쓰지 않는다.
   이유: at-least-once 중복과 재추론(예측 값 변경)을 추가 작업 없이 반영하기 위해서다.
-- **원본 보존 (ADR 0005):** Kafka 레코드 원본을 Spark 두 번째 스트리밍 쿼리(file sink)로 MinIO에 Parquet 저장.
+- **원본 보존 (ADR 0005):** Kafka 레코드 원본을 Spark 두 번째 스트리밍 쿼리(file sink)로 SeaweedFS(S3)에 Parquet 저장.
   재처리는 보존본을 Spark 배치 잡으로 읽어 스트리밍과 같은 코드로 처리한다.
 - **모델:** XGBoost를 오프라인 학습 → 직렬화 → Spark에서 추론만 수행. DL(1D-CNN/LSTM)은 확장 과제.
 - **누수 방지:** IP, 포트, 타임스탬프는 피처에서 제외. train/test는 세션 단위(`session_id`, a/b 쌍을 묶음)로 분할.
@@ -40,7 +40,7 @@ docs/              # 설계 결정 기록(ADR), 성능 실험 결과
 1. 데이터 탐색: 데이터셋 확정, NFStream 추출, 오프라인 XGBoost baseline
 2. 파이프라인 구축: docker-compose로 Replay → Kafka → Spark → ClickHouse 최소 파이프라인
 3. 스트리밍 처리: Spark 추론, 품질 검사, 멱등 적재
-4. 재처리: MinIO 원본 보존, 장애 후 재처리 검증
+4. 재처리: S3(SeaweedFS) 원본 보존, 장애 후 재처리 검증
 5. 성능: 부하 단계별 테스트, 병목 분석, 튜닝 전후 비교
 6. 분석·모니터링: dbt, Grafana 대시보드, 이상 주입 알림 검증
 7. 마무리: 문서화, 발표 준비 (여유 시 early classification / DL 비교)
@@ -91,7 +91,15 @@ docs/              # 설계 결정 기록(ADR), 성능 실험 결과
     - 실시간 held-out = 오프라인 held-out 평가 (accuracy 0.746, macro-F1 0.701, 클래스별 일치). in-sample은 0.950이라 전체로 재면 약 0.2 부풀려짐
     - held-out 세션은 규칙으로 골라 세션 CV(0.52)보다 높게 나온다. 일반화 추정은 세션 CV가 더 보수적
     - 새 모델로 `verify_step3.py` 14/14, 누수 테스트 3/3 (docs/step3-streaming.md 11절)
-- [ ] 4단계 원본 보존·재처리 (설계 채택, 구현 시작 전)
+- [ ] 4단계 원본 보존·재처리 (진행 중). 구현 기록: docs/step4-reprocessing.md
   - ADR 0004 시간 윈도우 집계 (상태: 채택, 2026-11-04): 위 "확정된 설계 결정"에 반영함. 뷰 구현은 6단계 대시보드와 함께
-  - ADR 0005 원본 보존과 재처리 (상태: 채택, 2026-11-04): Spark 두 번째 스트리밍 쿼리(file sink) → MinIO Parquet, 재처리는 보존본 → Spark 배치 잡.
+  - ADR 0005 원본 보존과 재처리 (상태: 채택, 2026-11-04): Spark 두 번째 스트리밍 쿼리(file sink) → SeaweedFS(S3) Parquet, 재처리는 보존본 → Spark 배치 잡.
     시나리오 ① Kafka 소실 후 복구, ② 새 모델 재추론. 성공 기준은 ADR에 수치로 정의
+  - [x] 저장소: MinIO 이미지 배포 중단(archived, 이미지 조회 불가) → **SeaweedFS 4.48** 승인 (`weed mini`, 버킷 capstone-raw / capstone-models)
+  - [x] Spark S3A: hadoop-aws 3.4.2 + AWS SDK bundle 2.29.52 (sha256 고정, 이미지 4.0 GB), Spark mem_limit 5 GB
+  - [x] 원본 보존 쿼리 (`src/streaming/archive.py`): 367,755건 → 34 MB Parquet. `verify_archive.py` 4/4 (개수·중복 0·누락 0·내용 전량 일치), 적재 쪽 `verify_step3` 14/14
+  - [x] 운영 안정화: 인프라 `restart: unless-stopped`, reset 스크립트 시간 제한·오류 표시, replay 브로커 확인
+    - **WSL이 wsl.exe 클라이언트가 없으면 배포판을 종료한다** (2026-11-04 두 번 관측). 긴 실행 중에는 Ubuntu 터미널을 열어 두거나 `wsl.exe -d Ubuntu -- sleep infinity`를 띄워 둔다
+    - 알려진 위험: seaweedfs 454 / 512 MiB, spark 4.08 / 5 GiB
+  - [ ] 시나리오 ① Kafka 소실 후 복구, ② 새 모델 재추론 (`src/reprocess/`)
+  - [ ] 모델 산출물 업로드 (도구 결정 대기)

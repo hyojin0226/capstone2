@@ -2,7 +2,7 @@
 
 - 날짜: 2026-10-26
 - 상태: **채택**. 구현 중 사실과 다른 점이 확인되면 이 문서를 고치고 변경 이유를 남긴다.
-- 범위: 2단계(최소 파이프라인) 구현에 필요한 결정. 모델 추론과 품질 검사는 3단계, MinIO는 4단계에서 다룬다.
+- 범위: 2단계(최소 파이프라인) 구현에 필요한 결정. 모델 추론과 품질 검사는 3단계, 원본 보존(ADR 0005)은 4단계에서 다룬다.
 
 ## 데이터 흐름 (2단계 목표)
 
@@ -279,7 +279,7 @@ ClickHouse 서버 메모리 상한은 `max_server_memory_usage_to_ram_ratio=0.8`
 - **수렴 확인:** `SELECT count() FROM flows_raw FINAL`이 `uniqExact(flow_id)`와 같으면 된다.
   필요하면 `OPTIMIZE TABLE flows_raw FINAL` 후에 `FINAL` 없는 `count()`로도 확인한다.
 - **기록할 것:** 중복 수, 재시작까지 걸린 시간, 재시작 후 처리량. 결과는 docs/에 남긴다.
-- 4단계는 같은 지표로 "MinIO 원본 → 재처리" 시나리오를 검증한다.
+- 4단계는 같은 지표로 "S3 보존본 → 재처리" 시나리오를 검증한다.
 - **결과 (2026-10-26):** 쓰기 도중 SIGKILL → 중복 18,684행(= 커밋되지 않은 배치 1개), `count() FINAL`과 `OPTIMIZE … FINAL` 후 모두 364,054로 수렴, 손실 0.
   상세: docs/step2-pipeline.md 7절, 재현: `infra/scripts/failure_test.sh`.
 - **측정 방법 보완 (2026-10-27):** 3단계에서 다시 돌렸을 때 측정 시점의 `count() − uniqExact(flow_id)`가 0이었다.

@@ -23,6 +23,15 @@ ADD --chmod=644 --checksum=sha256:5273c8bc8c0dca2211175c0d27efbd7228efae99689aac
 ADD --chmod=644 --checksum=sha256:d83736e24306e11929b0cf81b3306ae903c6f51c735c509ad5680c88640d99ce \
     ${MAVEN}/com/clickhouse/clickhouse-jdbc/0.10.0/clickhouse-jdbc-0.10.0-all.jar /opt/spark/jars/
 
+# S3A 커넥터: 원본 보존 쿼리와 재처리 잡이 SeaweedFS(S3)를 읽고 쓴다. ADR 0005
+# 이미지의 Hadoop이 3.4.2라서 hadoop-aws 3.4.2, AWS SDK는 hadoop-project 3.4.2에 적힌 2.29.52 (bundle 612 MB)
+ADD --chmod=644 --checksum=sha256:d2d24e6b715b5656b9d238bf13b6682a07e2004dd36aad74a73aeb854319f4d9 \
+    ${MAVEN}/org/apache/hadoop/hadoop-aws/3.4.2/hadoop-aws-3.4.2.jar /opt/spark/jars/
+ADD --chmod=644 --checksum=sha256:11029552e37408e41e689b20150f4b372e0b4f232de321ccafd0fcf443cdfb5a \
+    ${MAVEN}/software/amazon/s3/analyticsaccelerator/analyticsaccelerator-s3/1.2.1/analyticsaccelerator-s3-1.2.1.jar /opt/spark/jars/
+ADD --chmod=644 --checksum=sha256:62638f33045690c6bc5e496b54b0b2e89a9ad38cbedacdf6e017fea6bc85f55c \
+    ${MAVEN}/software/amazon/awssdk/bundle/2.29.52/bundle-2.29.52.jar /opt/spark/jars/
+
 USER root
 
 # 추론용 Python 패키지 (xgboost-cpu, pandas, pyarrow 등). 모든 파일을 sha256으로 고정한다. ADR 0003 결정 2

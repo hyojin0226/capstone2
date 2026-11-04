@@ -12,6 +12,7 @@ services:
   kafka:
     image: apache/kafka:4.3.2
     container_name: kafka
+    restart: unless-stopped            # WSL/docker 재시작 후 자동으로 다시 뜬다 (spark는 장애 테스트 때문에 제외)
     hostname: kafka
     ports:
       - "127.0.0.1:9094:9094"   # 호스트(WSL venv)에서 접속하는 리스너
@@ -47,6 +48,7 @@ services:
   clickhouse:
     image: clickhouse/clickhouse-server:26.8.35.10
     container_name: clickhouse
+    restart: unless-stopped            # WSL/docker 재시작 후 자동으로 다시 뜬다 (spark는 장애 테스트 때문에 제외)
     hostname: clickhouse
     ports:
       - "127.0.0.1:8123:8123"   # HTTP (JDBC, Grafana)
@@ -72,8 +74,33 @@ services:
       retries: 12
       start_period: 10s
 
+  seaweedfs:
+    # S3 호환 원본 보존소 (ADR 0005). MinIO 배포 중단으로 교체. 4.48 = 공개 2주가 지난 최신 릴리스 (2026-09-28)
+    image: chrislusf/seaweedfs:4.48
+    container_name: seaweedfs
+    restart: unless-stopped            # WSL/docker 재시작 후 자동으로 다시 뜬다 (spark는 장애 테스트 때문에 제외)
+    hostname: seaweedfs
+    command:
+      - mini                              # master + volume + filer + S3 게이트웨이를 한 프로세스로
+      - -dir=/data
+      - -s3.config=/etc/seaweedfs/s3.json # 접근 키 (로컬 개발용)
+      - -bucket=capstone-raw,capstone-models
+      - -admin.ui=false
+    ports:
+      - "127.0.0.1:8333:8333"             # S3 API
+    volumes:
+      - seaweedfs-data:/data
+      - ./seaweedfs/s3.json:/etc/seaweedfs/s3.json:ro
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9333/cluster/status > /dev/null && wget -q -S -O /dev/null http://localhost:8333/ 2>&1 | grep -q 'HTTP/'"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
   spark:
-    build: ./spark                       # apache/spark:4.1.3 + Kafka 소스·ClickHouse JDBC jar (sha256 고정)
+    build: ./spark                       # apache/spark:4.1.3 + Kafka 소스·ClickHouse JDBC·S3A jar (sha256 고정)
     image: capstone2/spark:4.1.3
     container_name: spark
     hostname: spark
@@ -97,6 +124,13 @@ services:
       PYTHONDONTWRITEBYTECODE: "1"       # 코드 마운트가 읽기 전용이라 .pyc를 만들지 않는다
       PYTHONPATH: /opt/app/src/streaming:/opt/app/src/extract   # mapInPandas 함수를 Python worker에서도 import하기 위해
       MODEL_DIR: /opt/app/models/${MODEL_VERSION:-xgb-20261027-1cc0f57c}   # ADR 0003 결정 1, 6 (held-out 세션 제외 학습)
+      # 원본 보존 쿼리 (ADR 0005): Kafka 레코드 원본 → SeaweedFS S3, Parquet
+      S3_ENDPOINT: http://seaweedfs:8333
+      S3_ACCESS_KEY: capstone
+      S3_SECRET_KEY: capstone-dev-secret
+      ARCHIVE_PATH: s3a://capstone-raw/flows.raw
+      ARCHIVE_CHECKPOINT_DIR: /checkpoints/archive
+      ARCHIVE_TRIGGER_INTERVAL: 1 minute
     volumes:
       - ../src:/opt/app/src:ro
       - ../models:/opt/app/models:ro
@@ -108,9 +142,12 @@ services:
         condition: service_healthy
       clickhouse:
         condition: service_healthy
-    mem_limit: 4g
+      seaweedfs:
+        condition: service_healthy
+    mem_limit: 5g                         # ADR 0005: 4 → 5 GB (보존 쿼리 추가, 3단계에서 3.54 / 4 GiB 관측)
 
 volumes:
   kafka-data:
   clickhouse-data:
   spark-checkpoints:
+  seaweedfs-data:

@@ -128,6 +128,14 @@ def main() -> None:
         "partitioner": "murmur2_random",  # Java 클라이언트와 같은 key → 파티션 규칙
     })
 
+    # 브로커에 닿지 않으면 바로 실패한다 (그대로 두면 librdkafka가 연결을 끝없이 재시도한다)
+    try:
+        topics = producer.list_topics(timeout=10).topics
+    except KafkaException as e:
+        raise SystemExit(f"kafka not reachable at {args.bootstrap}: {e}")
+    if args.topic not in topics:
+        raise SystemExit(f"topic {args.topic} does not exist at {args.bootstrap}")
+
     delivered, failed = Counter(), []
 
     def on_delivery(err, msg):
