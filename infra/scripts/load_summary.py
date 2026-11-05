@@ -93,6 +93,8 @@ def main() -> None:
         "sent": sent, "stored": int(acct.stored), "rejected": int(acct.rejected),
         "accounting_ok": sent == int(acct.stored) + int(acct.rejected), "final_dup": int(acct.raw_final) - int(acct.stored),
         "archive_enabled": meta.get("archive_enabled", True), "spark_gc_pct": gc_pct,
+        "kafka_mem_limit": meta.get("kafka_mem_limit", "2g"), "kafka_mem_max_events": meta.get("kafka_mem_max_events"),
+        "io_full_stall_ms": meta.get("io_full_stall_ms"),
     }
     (run / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
     results = run.parent / "results.csv"
@@ -114,7 +116,8 @@ def main() -> None:
           f"over trigger {summary['batches_over_trigger']}")
     print(f"spark cpu {summary['spark_cpu_avg']}% mem max {summary['spark_mem_max_mib']} MiB | clickhouse cpu {summary['clickhouse_cpu_avg']}% "
           f"mem max {summary['clickhouse_mem_max_mib']} MiB | kafka mem {summary['kafka_mem_max_mib']} | seaweedfs mem {summary['seaweedfs_mem_max_mib']} | parts max {summary['parts_max']}")
-    print(f"archive query {'on' if summary['archive_enabled'] else 'OFF'} | spark GC {gc_pct}% of steady time")
+    print(f"archive query {'on' if summary['archive_enabled'] else 'OFF'} | spark GC {gc_pct}% of steady time | "
+          f"kafka limit {summary['kafka_mem_limit']} hit {summary['kafka_mem_max_events']} times | io full stall {summary['io_full_stall_ms']} ms (whole run)")
     print(f"accounting sent = stored + rejected: {summary['accounting_ok']} ({sent:,} = {summary['stored']:,} + {summary['rejected']:,}), FINAL dup {summary['final_dup']}")
 
 

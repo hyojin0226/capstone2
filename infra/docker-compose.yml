@@ -37,7 +37,7 @@ services:
       KAFKA_HEAP_OPTS: "-Xmx1g -Xms1g"
     volumes:
       - kafka-data:/var/lib/kafka/data
-    mem_limit: 2g
+    mem_limit: ${KAFKA_MEM_LIMIT:-2g}   # heap 1g + 페이지 캐시. 부하 실험 H9 진단용으로 바꿀 수 있다
     healthcheck:
       test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1"]
       interval: 10s
