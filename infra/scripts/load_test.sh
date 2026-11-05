@@ -27,7 +27,7 @@ ch() {
     "http://127.0.0.1:8123/" --data-binary "$1"
 }
 
-echo "### $LABEL rate=$RATE duration=${DURATION}s trigger='${TRIGGER_INTERVAL:-5 seconds}' cap=${MAX_OFFSETS_PER_TRIGGER:-50000} archive=${ARCHIVE_ENABLED:-true} → $RUN"
+echo "### $LABEL rate=$RATE duration=${DURATION}s trigger='${TRIGGER_INTERVAL:-5 seconds}' cap=${MAX_OFFSETS_PER_TRIGGER:-100000} archive=${ARCHIVE_ENABLED:-true} → $RUN"
 bash infra/scripts/reset_pipeline.sh > "$RUN/reset.log" 2>&1 || { tail -20 "$RUN/reset.log"; exit 1; }
 
 python infra/scripts/load_sampler.py "$RUN/samples.csv" > "$RUN/sampler.log" 2>&1 &
@@ -53,7 +53,7 @@ kill $SAMPLER 2>/dev/null || true
 
 cat > "$RUN/meta.json" <<JSON
 {"label": "$LABEL", "rate": $RATE, "duration": $DURATION, "warmup": $WARMUP,
- "trigger": "${TRIGGER_INTERVAL:-5 seconds}", "max_offsets_per_trigger": ${MAX_OFFSETS_PER_TRIGGER:-50000},
+ "trigger": "${TRIGGER_INTERVAL:-5 seconds}", "max_offsets_per_trigger": ${MAX_OFFSETS_PER_TRIGGER:-100000},
  "send_start_ms": $SEND_START, "steady_start_ms": $((SEND_START + WARMUP * 1000)), "send_end_ms": $SEND_END,
  "drain_seconds": $DRAIN, "producer_args": "$*", "archive_enabled": $([ "${ARCHIVE_ENABLED:-true}" = "false" ] && echo false || echo true)}
 JSON

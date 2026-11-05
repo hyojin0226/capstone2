@@ -116,7 +116,7 @@ services:
       KAFKA_TOPIC: flows.raw
       CHECKPOINT_DIR: /checkpoints/flows_raw
       TRIGGER_INTERVAL: ${TRIGGER_INTERVAL:-5 seconds}              # 튜닝 실험은 환경 변수로 덮어쓴다 (ADR 0006)
-      MAX_OFFSETS_PER_TRIGGER: "${MAX_OFFSETS_PER_TRIGGER:-50000}"
+      MAX_OFFSETS_PER_TRIGGER: "${MAX_OFFSETS_PER_TRIGGER:-100000}"   # T2 결과로 50,000 → 100,000 (docs/step5-load.md 6절)
       CLICKHOUSE_URL: jdbc:clickhouse://clickhouse:8123/capstone
       CLICKHOUSE_TABLE: capstone.flows_raw
       CLICKHOUSE_USER: ${CLICKHOUSE_USER:-capstone}
