@@ -132,6 +132,7 @@ services:
       ARCHIVE_CHECKPOINT_DIR: /checkpoints/archive
       ARCHIVE_TRIGGER_INTERVAL: ${ARCHIVE_TRIGGER_INTERVAL:-1 minute}
       ARCHIVE_ENABLED: ${ARCHIVE_ENABLED:-true}   # false는 부하 실험 진단용 (ADR 0006 H6)
+      KAFKA_MIN_PARTITIONS: "${KAFKA_MIN_PARTITIONS-6}"   # Kafka 파티션 3개를 Spark task 6개로 나눠 읽는다. T5 결과 (docs/step5-load.md 8절). 빈 값이면 파티션당 1개
     volumes:
       - ../src:/opt/app/src:ro
       - ../models:/opt/app/models:ro

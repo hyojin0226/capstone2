@@ -6,6 +6,8 @@
 #   TRIGGER_INTERVAL="2 seconds" MAX_OFFSETS_PER_TRIGGER=100000 bash infra/scripts/load_test.sh 8000 240 trigger2s
 #   ARCHIVE_ENABLED=false bash infra/scripts/load_test.sh 10000 240 noarchive   (진단용: 보존 쿼리 끔, H6)
 #   KAFKA_MEM_LIMIT=4g bash infra/scripts/load_test.sh 10000 240 kafka4g          (진단용: Kafka 메모리 한도, H9)
+#   TOPIC_PARTITIONS=6 bash infra/scripts/load_test.sh 12000 240 p6               (T5: 토픽 파티션 수)
+#   KAFKA_MIN_PARTITIONS=6 bash infra/scripts/load_test.sh 12000 240 minp6        (T5 비교: Spark task만 나눔)
 #
 # 절차: 초기화(환경 변수 설정 반영) → 자원·lag 샘플러 시작 → 일정 속도 송신(앞 60초는 워밍업)
 #       → 송신이 끝난 뒤 lag이 0이 될 때까지 대기(drain) → 요약
@@ -28,7 +30,7 @@ ch() {
     "http://127.0.0.1:8123/" --data-binary "$1"
 }
 
-echo "### $LABEL rate=$RATE duration=${DURATION}s trigger='${TRIGGER_INTERVAL:-5 seconds}' cap=${MAX_OFFSETS_PER_TRIGGER:-100000} archive=${ARCHIVE_ENABLED:-true} kafka_mem=${KAFKA_MEM_LIMIT:-2g} → $RUN"
+echo "### $LABEL rate=$RATE duration=${DURATION}s trigger='${TRIGGER_INTERVAL:-5 seconds}' cap=${MAX_OFFSETS_PER_TRIGGER:-100000} archive=${ARCHIVE_ENABLED:-true} kafka_mem=${KAFKA_MEM_LIMIT:-2g} partitions=${TOPIC_PARTITIONS:-3} minPartitions=${KAFKA_MIN_PARTITIONS-6} → $RUN"
 bash infra/scripts/reset_pipeline.sh > "$RUN/reset.log" 2>&1 || { tail -20 "$RUN/reset.log"; exit 1; }
 
 # H9 진단: Kafka cgroup이 메모리 한도에 닿은 횟수(memory.events max)와 VM 전체 I/O full 대기(PSI, µs)의 실행 중 증가량
@@ -63,6 +65,7 @@ cat > "$RUN/meta.json" <<JSON
  "trigger": "${TRIGGER_INTERVAL:-5 seconds}", "max_offsets_per_trigger": ${MAX_OFFSETS_PER_TRIGGER:-100000},
  "send_start_ms": $SEND_START, "steady_start_ms": $((SEND_START + WARMUP * 1000)), "send_end_ms": $SEND_END,
  "drain_seconds": $DRAIN, "producer_args": "$*", "archive_enabled": $([ "${ARCHIVE_ENABLED:-true}" = "false" ] && echo false || echo true),
- "kafka_mem_limit": "${KAFKA_MEM_LIMIT:-2g}", "kafka_mem_max_events": $((KMAX1 - KMAX0)), "io_full_stall_ms": $(( (IO1 - IO0) / 1000 ))}
+ "kafka_mem_limit": "${KAFKA_MEM_LIMIT:-2g}", "kafka_mem_max_events": $((KMAX1 - KMAX0)), "io_full_stall_ms": $(( (IO1 - IO0) / 1000 )),
+ "topic_partitions": ${TOPIC_PARTITIONS:-3}, "kafka_min_partitions": "${KAFKA_MIN_PARTITIONS-6}"}
 JSON
 python infra/scripts/load_summary.py "$RUN"

@@ -30,7 +30,7 @@ docker volume rm capstone2_spark-checkpoints >/dev/null 2>&1 || true
 # 2. Kafka 토픽
 $KAFKA/kafka-topics.sh --bootstrap-server kafka:9092 --delete --topic flows.raw >/dev/null 2>&1 || true
 wait_for "flows.raw deleted" bash -c "! $KAFKA/kafka-topics.sh --bootstrap-server kafka:9092 --list | grep -qx flows.raw"
-$KAFKA/kafka-topics.sh --bootstrap-server kafka:9092 --create --topic flows.raw --partitions 3 --replication-factor 1 2>&1 | grep -v WARNING
+$KAFKA/kafka-topics.sh --bootstrap-server kafka:9092 --create --topic flows.raw --partitions ${TOPIC_PARTITIONS:-3} --replication-factor 1 2>&1 | grep -v WARNING
 
 # 3. ClickHouse 테이블
 $CH -q "TRUNCATE TABLE capstone.flows_raw"

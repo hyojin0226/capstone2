@@ -95,6 +95,7 @@ def main() -> None:
         "archive_enabled": meta.get("archive_enabled", True), "spark_gc_pct": gc_pct,
         "kafka_mem_limit": meta.get("kafka_mem_limit", "2g"), "kafka_mem_max_events": meta.get("kafka_mem_max_events"),
         "io_full_stall_ms": meta.get("io_full_stall_ms"),
+        "topic_partitions": meta.get("topic_partitions", 3), "kafka_min_partitions": meta.get("kafka_min_partitions", ""),
     }
     (run / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
     results = run.parent / "results.csv"
@@ -106,7 +107,8 @@ def main() -> None:
         old = pd.read_csv(results) if header else pd.DataFrame()
         pd.concat([old, pd.DataFrame([summary])], ignore_index=True).to_csv(results, index=False)
 
-    print(f"== {summary['label']} rate={summary['rate']:,} trigger={summary['trigger']} cap={summary['max_offsets_per_trigger']}")
+    print(f"== {summary['label']} rate={summary['rate']:,} trigger={summary['trigger']} cap={summary['max_offsets_per_trigger']} "
+          f"partitions={summary['topic_partitions']} minPartitions={summary['kafka_min_partitions'] or '-'}")
     print(f"sent {sent:,} (achieved {achieved:,.0f}/s) | processed (steady) {processed_rate:,.0f}/s | lag slope {slope:,.1f}/s, "
           f"max {summary['lag_max']:,} | drain {meta['drain_seconds']}s | SUSTAINABLE={summary['sustainable']}")
     print(f"E2E p50/p95/p99/max {summary['e2e_p50_ms']}/{summary['e2e_p95_ms']}/{summary['e2e_p99_ms']}/{summary['e2e_max_ms']} ms "

@@ -38,6 +38,8 @@ TOPIC = os.environ.get("KAFKA_TOPIC", "flows.raw")
 CHECKPOINT = os.environ.get("CHECKPOINT_DIR", "/checkpoints/flows_raw")
 TRIGGER = os.environ.get("TRIGGER_INTERVAL", "5 seconds")
 MAX_OFFSETS_PER_TRIGGER = os.environ.get("MAX_OFFSETS_PER_TRIGGER", "100000")
+# Kafka 파티션보다 많은 Spark task로 나눠 읽는다 (빈 값이면 파티션당 task 1개). ADR 0006 T5 비교용
+MIN_PARTITIONS = os.environ.get("KAFKA_MIN_PARTITIONS", "")
 CLICKHOUSE_URL = os.environ.get("CLICKHOUSE_URL", "jdbc:clickhouse://clickhouse:8123/capstone")
 CLICKHOUSE_USER = os.environ.get("CLICKHOUSE_USER", "capstone")
 CLICKHOUSE_PASSWORD = os.environ.get("CLICKHOUSE_PASSWORD", "capstone-dev")
@@ -196,7 +198,10 @@ def main() -> None:
                      .config("spark.sql.shuffle.partitions", "3")).getOrCreate()
     spark.sparkContext.setLogLevel("WARN")
 
-    raw = (spark.readStream.format("kafka")
+    reader = spark.readStream.format("kafka")
+    if MIN_PARTITIONS:
+        reader = reader.option("minPartitions", MIN_PARTITIONS)
+    raw = (reader
            .option("kafka.bootstrap.servers", KAFKA_BOOTSTRAP)
            .option("subscribe", TOPIC)
            .option("startingOffsets", "earliest")       # 체크포인트가 없을 때만 쓰인다
@@ -211,7 +216,7 @@ def main() -> None:
              .trigger(processingTime=TRIGGER)
              .start())
     print(f"started: {TOPIC} → flows_raw / flows_rejected / pipeline_batches | checkpoint={CHECKPOINT} "
-          f"trigger={TRIGGER} maxOffsetsPerTrigger={MAX_OFFSETS_PER_TRIGGER}", flush=True)
+          f"trigger={TRIGGER} maxOffsetsPerTrigger={MAX_OFFSETS_PER_TRIGGER} minPartitions={MIN_PARTITIONS or '-'}", flush=True)
 
     # 원본 보존 쿼리 (ADR 0005). 적재 쿼리와 독립: Kafka를 따로 읽고 체크포인트도 따로 둔다
     # ARCHIVE_ENABLED=false는 부하 실험에서 보존 쿼리의 영향을 떼어 보는 진단용이다 (ADR 0006 H6). 운영에서는 끄지 않는다
