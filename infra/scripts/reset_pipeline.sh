@@ -41,12 +41,13 @@ $CH -q "TRUNCATE TABLE IF EXISTS capstone.flow_predictions"
 # 4. 원본 보존본 (SeaweedFS). 이전 offset의 보존본과 섞이면 안 된다 (ADR 0005)
 echo "fs.rm -r /buckets/capstone-raw/flows.raw" | docker exec -i seaweedfs weed shell -master=localhost:9333 >/dev/null 2>&1 || true
 
-# 5. Spark 잡 시작: 적재 쿼리와 보존 쿼리 둘 다 "started:"를 찍어야 한다
+# 5. Spark 잡 시작: 적재 쿼리와 보존 쿼리 둘 다 "started:"를 찍어야 한다 (ARCHIVE_ENABLED=false 진단 실험이면 적재 쿼리만)
 $COMPOSE up -d spark
+QUERIES=2; [ "${ARCHIVE_ENABLED:-true}" = "false" ] && QUERIES=1
 spark_ready() {
   if docker logs spark 2>&1 | grep -q "Traceback"; then docker logs --tail 30 spark 2>&1; exit 1; fi
-  [ "$(docker logs spark 2>&1 | grep -c '^started:')" -ge 2 ]
+  [ "$(docker logs spark 2>&1 | grep -c '^started:')" -ge "$QUERIES" ]
 }
 wait_for "spark queries started" spark_ready
-docker logs spark 2>&1 | grep -E "^model:|^started:"
+docker logs spark 2>&1 | grep -E "^model:|^started:|^archive query DISABLED"
 echo "reset done: flows.raw empty, flows_raw/flows_rejected/pipeline_batches truncated, archive cleared, checkpoints cleared"

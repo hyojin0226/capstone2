@@ -131,6 +131,7 @@ services:
       ARCHIVE_PATH: s3a://capstone-raw/flows.raw
       ARCHIVE_CHECKPOINT_DIR: /checkpoints/archive
       ARCHIVE_TRIGGER_INTERVAL: ${ARCHIVE_TRIGGER_INTERVAL:-1 minute}
+      ARCHIVE_ENABLED: ${ARCHIVE_ENABLED:-true}   # false는 부하 실험 진단용 (ADR 0006 H6)
     volumes:
       - ../src:/opt/app/src:ro
       - ../models:/opt/app/models:ro

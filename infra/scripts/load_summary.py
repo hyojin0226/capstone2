@@ -62,6 +62,11 @@ def main() -> None:
     achieved = float(re.search(r"achieved ([\d,]+)", log).group(1).replace(",", ""))
     processed_rate = (st.processed_end.iloc[-1] - st.processed_end.iloc[0]) / ((st.ts_ms.iloc[-1] - st.ts_ms.iloc[0]) / 1000) \
         if len(st) >= 2 else 0.0
+    # Spark JVM GC 시간 비율 (%): 정상 구간에서 누적 GC 시간이 늘어난 양 / 경과 시간
+    gc_pct = None
+    if "spark_gc_ms" in st and st.spark_gc_ms.notna().sum() >= 2:
+        g = st.dropna(subset=["spark_gc_ms"])
+        gc_pct = round(100 * (g.spark_gc_ms.iloc[-1] - g.spark_gc_ms.iloc[0]) / (g.ts_ms.iloc[-1] - g.ts_ms.iloc[0]), 1)
     sustainable = slope < 0.02 * meta["rate"] and int(batches.over_trigger) == 0 and meta["drain_seconds"] <= 2 * trigger_s + 10
 
     summary = {
@@ -87,15 +92,17 @@ def main() -> None:
         "parts_max": int(st.flows_raw_parts.max()) if len(st) else None,
         "sent": sent, "stored": int(acct.stored), "rejected": int(acct.rejected),
         "accounting_ok": sent == int(acct.stored) + int(acct.rejected), "final_dup": int(acct.raw_final) - int(acct.stored),
+        "archive_enabled": meta.get("archive_enabled", True), "spark_gc_pct": gc_pct,
     }
     (run / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
     results = run.parent / "results.csv"
-    new = not results.exists()
-    with open(results, "a", newline="") as fh:
-        w = csv.DictWriter(fh, fieldnames=list(summary))
-        if new:
-            w.writeheader()
-        w.writerow(summary)
+    header = next(csv.reader(open(results)), []) if results.exists() else []
+    if header == list(summary):
+        with open(results, "a", newline="") as fh:
+            csv.DictWriter(fh, fieldnames=list(summary)).writerow(summary)
+    else:  # 새 열이 생겼거나 파일이 없다: 이전 행을 보존한 채 열을 합쳐 다시 쓴다
+        old = pd.read_csv(results) if header else pd.DataFrame()
+        pd.concat([old, pd.DataFrame([summary])], ignore_index=True).to_csv(results, index=False)
 
     print(f"== {summary['label']} rate={summary['rate']:,} trigger={summary['trigger']} cap={summary['max_offsets_per_trigger']}")
     print(f"sent {sent:,} (achieved {achieved:,.0f}/s) | processed (steady) {processed_rate:,.0f}/s | lag slope {slope:,.1f}/s, "
@@ -107,6 +114,7 @@ def main() -> None:
           f"over trigger {summary['batches_over_trigger']}")
     print(f"spark cpu {summary['spark_cpu_avg']}% mem max {summary['spark_mem_max_mib']} MiB | clickhouse cpu {summary['clickhouse_cpu_avg']}% "
           f"mem max {summary['clickhouse_mem_max_mib']} MiB | kafka mem {summary['kafka_mem_max_mib']} | seaweedfs mem {summary['seaweedfs_mem_max_mib']} | parts max {summary['parts_max']}")
+    print(f"archive query {'on' if summary['archive_enabled'] else 'OFF'} | spark GC {gc_pct}% of steady time")
     print(f"accounting sent = stored + rejected: {summary['accounting_ok']} ({sent:,} = {summary['stored']:,} + {summary['rejected']:,}), FINAL dup {summary['final_dup']}")
 
 

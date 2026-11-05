@@ -4,6 +4,7 @@
 # 사용법 (WSL 레포 루트, venv 활성화 상태):
 #   bash infra/scripts/load_test.sh <rate msg/s> [duration_s=240] [label=baseline] [extra producer args...]
 #   TRIGGER_INTERVAL="2 seconds" MAX_OFFSETS_PER_TRIGGER=100000 bash infra/scripts/load_test.sh 8000 240 trigger2s
+#   ARCHIVE_ENABLED=false bash infra/scripts/load_test.sh 10000 240 noarchive   (진단용: 보존 쿼리 끔, H6)
 #
 # 절차: 초기화(환경 변수 설정 반영) → 자원·lag 샘플러 시작 → 일정 속도 송신(앞 60초는 워밍업)
 #       → 송신이 끝난 뒤 lag이 0이 될 때까지 대기(drain) → 요약
@@ -26,7 +27,7 @@ ch() {
     "http://127.0.0.1:8123/" --data-binary "$1"
 }
 
-echo "### $LABEL rate=$RATE duration=${DURATION}s trigger='${TRIGGER_INTERVAL:-5 seconds}' cap=${MAX_OFFSETS_PER_TRIGGER:-50000} → $RUN"
+echo "### $LABEL rate=$RATE duration=${DURATION}s trigger='${TRIGGER_INTERVAL:-5 seconds}' cap=${MAX_OFFSETS_PER_TRIGGER:-50000} archive=${ARCHIVE_ENABLED:-true} → $RUN"
 bash infra/scripts/reset_pipeline.sh > "$RUN/reset.log" 2>&1 || { tail -20 "$RUN/reset.log"; exit 1; }
 
 python infra/scripts/load_sampler.py "$RUN/samples.csv" > "$RUN/sampler.log" 2>&1 &
@@ -54,6 +55,6 @@ cat > "$RUN/meta.json" <<JSON
 {"label": "$LABEL", "rate": $RATE, "duration": $DURATION, "warmup": $WARMUP,
  "trigger": "${TRIGGER_INTERVAL:-5 seconds}", "max_offsets_per_trigger": ${MAX_OFFSETS_PER_TRIGGER:-50000},
  "send_start_ms": $SEND_START, "steady_start_ms": $((SEND_START + WARMUP * 1000)), "send_end_ms": $SEND_END,
- "drain_seconds": $DRAIN, "producer_args": "$*"}
+ "drain_seconds": $DRAIN, "producer_args": "$*", "archive_enabled": $([ "${ARCHIVE_ENABLED:-true}" = "false" ] && echo false || echo true)}
 JSON
 python infra/scripts/load_summary.py "$RUN"

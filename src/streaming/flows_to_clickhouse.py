@@ -214,7 +214,11 @@ def main() -> None:
           f"trigger={TRIGGER} maxOffsetsPerTrigger={MAX_OFFSETS_PER_TRIGGER}", flush=True)
 
     # 원본 보존 쿼리 (ADR 0005). 적재 쿼리와 독립: Kafka를 따로 읽고 체크포인트도 따로 둔다
-    start_archive_query(spark, KAFKA_BOOTSTRAP, TOPIC)
+    # ARCHIVE_ENABLED=false는 부하 실험에서 보존 쿼리의 영향을 떼어 보는 진단용이다 (ADR 0006 H6). 운영에서는 끄지 않는다
+    if os.environ.get("ARCHIVE_ENABLED", "true").lower() != "false":
+        start_archive_query(spark, KAFKA_BOOTSTRAP, TOPIC)
+    else:
+        print("archive query DISABLED (ARCHIVE_ENABLED=false, diagnosis only)", flush=True)
     spark.streams.awaitAnyTermination()   # 둘 중 하나라도 실패하면 앱이 끝난다 (조용히 한쪽만 멈추지 않게)
 
 
