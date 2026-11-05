@@ -54,14 +54,18 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--replay-log", type=Path, required=True)
     parser.add_argument("--model-dir", type=Path, default=None,
-                        help="기본: MODEL_VERSION 환경 변수, 없으면 created_at이 가장 최근인 models/<version>")
+                        help="기본: MODEL_VERSION 환경 변수, 없으면 Spark가 실제로 쓴 모델 (pipeline_batches.model_version)")
     args = parser.parse_args()
     if args.model_dir is None:
         if os.environ.get("MODEL_VERSION"):
             args.model_dir = Path("models") / os.environ["MODEL_VERSION"]
         else:
-            args.model_dir = max(Path("models").glob("*/metadata.json"),
-                                 key=lambda p: json.loads(p.read_text())["created_at"]).parent
+            # 가장 최근에 만든 모델이 아니라 이번 실행에서 Spark가 서빙한 모델과 비교한다
+            # (재추론 실험용 모델이 models/에 있으면 최신 모델은 운영 모델이 아니다. docs/step5-load.md 8-1)
+            served = ch("SELECT DISTINCT model_version FROM capstone.pipeline_batches FINAL")["model_version"].tolist()
+            if len(served) != 1:
+                sys.exit(f"Spark가 쓴 모델이 하나가 아니다 ({served}). --model-dir models/<version>으로 지정하라")
+            args.model_dir = Path("models") / served[0]
     print(f"model: {args.model_dir}")
 
     log = args.replay_log.read_text()
