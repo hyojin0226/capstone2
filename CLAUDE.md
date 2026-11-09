@@ -138,4 +138,4 @@ docs/              # 설계 결정 기록(ADR), 성능 실험 결과
     필터 위치 변경 가설은 기각(오히려 느림)하고 되돌림. 시나리오 ② 재검증 통과
   - T4(13절): raw_value를 거부 행에만 남겨도 처리량·prepare·메모리 차이 없음 → H3 기각, 변경 되돌림 (검증은 모두 통과했었음)
   - 6단계로 넘길 것: flows_raw TTL·B4 검토, H9c(swap 아닌 I/O 대기), 고부하 중 재추론 동시 실행
-- [ ] 6단계 dbt·Grafana·이상 주입 알림 검증 — 계획: docs/status-and-plan.md
+- [ ] 6단계 dbt·Grafana·이상 주입 알림 검증 — 계획: docs/status-and-plan.md, 설계: docs/adr/0007-dashboard-alerting-dbt.md (제안, 승인 대기)

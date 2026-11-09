@@ -115,7 +115,7 @@ PCAP ─(NFStream, 오프라인)→ 플로우 parquet ─(replay producer, 배�
 | Grafana ClickHouse 데이터소스 플러그인 | Grafana가 ClickHouse를 조회하는 방법 | Altinity 플러그인 / 공식 플러그인 중 택1. 버전 고정해 프로비저닝 |
 | dbt-core + dbt-clickhouse (venv) | 이력·분석용 집계 모델, 테스트 (ADR 0004 B3) | ClickHouse SQL 스크립트 + cron (테스트·문서화 기능 없음) |
 
-→ 설계는 **ADR 0007(대시보드·알림·dbt)**로 먼저 제안하고, 승인 후 구현한다.
+→ 설계는 **ADR 0007(대시보드·알림·dbt)**로 먼저 제안하고, 승인 후 구현한다. 초안: [docs/adr/0007-dashboard-alerting-dbt.md](adr/0007-dashboard-alerting-dbt.md) (제안, 2026-11-10)
 
 ### 3-1. ClickHouse 집계 뷰 (ADR 0004 설계 그대로)
 
