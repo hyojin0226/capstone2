@@ -28,7 +28,8 @@ def main() -> None:
             ax2.plot(rates, g[col].mean() / 1000, style, label=f"{label} {col.split('_')[1]}")
     lim = df.rate.max() * 1.05
     ax1.plot([0, lim], [0, lim], color="gray", lw=0.8, label="processed = sent")
-    ax1.axhline(10000, color="red", lw=0.8, ls="--", label="cap 50,000 / 5 s")
+    if "baseline" in labels:  # 기준선 설정의 처리 상한 (T2 전)
+        ax1.axhline(10000, color="red", lw=0.8, ls="--", label="baseline cap 50,000 / 5 s")
     ax1.set(xlabel="target rate (msg/s)", ylabel="processed rate, steady (msg/s)", title="Throughput")
     ax2.set(xlabel="target rate (msg/s)", ylabel="E2E latency (s, log)", yscale="log", title="E2E latency (inserted_at - replay_sent)")
     for ax in (ax1, ax2):
