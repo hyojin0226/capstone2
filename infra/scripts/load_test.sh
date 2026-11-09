@@ -30,13 +30,18 @@ ch() {
     "http://127.0.0.1:8123/" --data-binary "$1"
 }
 
-echo "### $LABEL rate=$RATE duration=${DURATION}s trigger='${TRIGGER_INTERVAL:-5 seconds}' cap=${MAX_OFFSETS_PER_TRIGGER:-100000} archive=${ARCHIVE_ENABLED:-true} kafka_mem=${KAFKA_MEM_LIMIT:-2g} partitions=${TOPIC_PARTITIONS:-3} minPartitions=${KAFKA_MIN_PARTITIONS-6} → $RUN"
+echo "### $LABEL rate=$RATE duration=${DURATION}s trigger='${TRIGGER_INTERVAL:-5 seconds}' cap=${MAX_OFFSETS_PER_TRIGGER:-100000} archive=${ARCHIVE_ENABLED:-true} kafka_mem=${KAFKA_MEM_LIMIT:-2g} partitions=${TOPIC_PARTITIONS:-3} minPartitions=${KAFKA_MIN_PARTITIONS-6} spark_mem=${SPARK_MEM_LIMIT:-7g}/${SPARK_MEMSWAP_LIMIT:-${SPARK_MEM_LIMIT:-7g}} → $RUN"
 bash infra/scripts/reset_pipeline.sh > "$RUN/reset.log" 2>&1 || { tail -20 "$RUN/reset.log"; exit 1; }
 
 # H9 진단: Kafka cgroup이 메모리 한도에 닿은 횟수(memory.events max)와 VM 전체 I/O full 대기(PSI, µs)의 실행 중 증가량
 kafka_mem_max() { awk '$1=="max"{print $2}' "/sys/fs/cgroup/system.slice/docker-$(docker inspect -f '{{.Id}}' kafka).scope/memory.events" 2>/dev/null || echo 0; }
 io_full_us() { awk '/^full/{sub("total=","",$5); print $5}' /proc/pressure/io; }
 KMAX0=$(kafka_mem_max); IO0=$(io_full_us)
+# H9b 진단: 컨테이너별 major fault(디스크·swap에서 다시 읽은 페이지) 증가량과 실행 끝의 swap 사용량
+cg() { echo "/sys/fs/cgroup/system.slice/docker-$(docker inspect -f '{{.Id}}' "$1").scope"; }
+majflt() { awk '$1=="pgmajfault"{print $2}' "$(cg "$1")/memory.stat" 2>/dev/null || echo 0; }
+swap_mib() { echo $(( $(cat "$(cg "$1")/memory.swap.current" 2>/dev/null || echo 0) / 1048576 )); }
+declare -A MF0; for c in spark kafka clickhouse seaweedfs; do MF0[$c]=$(majflt $c); done
 
 python infra/scripts/load_sampler.py "$RUN/samples.csv" > "$RUN/sampler.log" 2>&1 &
 SAMPLER=$!
@@ -58,6 +63,9 @@ until [ "$DRAIN" -ge "$DRAIN_LIMIT" ]; do
 done
 sleep 6   # 마지막 샘플과 insert 반영
 KMAX1=$(kafka_mem_max); IO1=$(io_full_us)
+SWAPJSON=""; for c in spark kafka clickhouse seaweedfs; do
+  SWAPJSON+="\"${c}_majflt\": $(( $(majflt $c) - ${MF0[$c]} )), \"${c}_swap_mib\": $(swap_mib $c), "
+done
 kill $SAMPLER 2>/dev/null || true
 
 cat > "$RUN/meta.json" <<JSON
@@ -66,6 +74,7 @@ cat > "$RUN/meta.json" <<JSON
  "send_start_ms": $SEND_START, "steady_start_ms": $((SEND_START + WARMUP * 1000)), "send_end_ms": $SEND_END,
  "drain_seconds": $DRAIN, "producer_args": "$*", "archive_enabled": $([ "${ARCHIVE_ENABLED:-true}" = "false" ] && echo false || echo true),
  "kafka_mem_limit": "${KAFKA_MEM_LIMIT:-2g}", "kafka_mem_max_events": $((KMAX1 - KMAX0)), "io_full_stall_ms": $(( (IO1 - IO0) / 1000 )),
+ $SWAPJSON
  "topic_partitions": ${TOPIC_PARTITIONS:-3}, "kafka_min_partitions": "${KAFKA_MIN_PARTITIONS-6}"}
 JSON
 python infra/scripts/load_summary.py "$RUN"

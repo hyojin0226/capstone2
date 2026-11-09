@@ -95,6 +95,7 @@ def main() -> None:
         "archive_enabled": meta.get("archive_enabled", True), "spark_gc_pct": gc_pct,
         "kafka_mem_limit": meta.get("kafka_mem_limit", "2g"), "kafka_mem_max_events": meta.get("kafka_mem_max_events"),
         "io_full_stall_ms": meta.get("io_full_stall_ms"),
+        **{f"{c}_{k}": meta.get(f"{c}_{k}") for c in ("spark", "kafka", "clickhouse", "seaweedfs") for k in ("majflt", "swap_mib")},
         "topic_partitions": meta.get("topic_partitions", 3), "kafka_min_partitions": meta.get("kafka_min_partitions", ""),
     }
     (run / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
@@ -120,6 +121,8 @@ def main() -> None:
           f"mem max {summary['clickhouse_mem_max_mib']} MiB | kafka mem {summary['kafka_mem_max_mib']} | seaweedfs mem {summary['seaweedfs_mem_max_mib']} | parts max {summary['parts_max']}")
     print(f"archive query {'on' if summary['archive_enabled'] else 'OFF'} | spark GC {gc_pct}% of steady time | "
           f"kafka limit {summary['kafka_mem_limit']} hit {summary['kafka_mem_max_events']} times | io full stall {summary['io_full_stall_ms']} ms (whole run)")
+    print("major faults / swap MiB at end: " + " | ".join(
+        f"{c} {summary[c + '_majflt']} / {summary[c + '_swap_mib']}" for c in ("spark", "kafka", "clickhouse", "seaweedfs")))
     print(f"accounting sent = stored + rejected: {summary['accounting_ok']} ({sent:,} = {summary['stored']:,} + {summary['rejected']:,}), FINAL dup {summary['final_dup']}")
 
 

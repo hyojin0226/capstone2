@@ -38,6 +38,7 @@ services:
     volumes:
       - kafka-data:/var/lib/kafka/data
     mem_limit: ${KAFKA_MEM_LIMIT:-2g}   # heap 1g + 페이지 캐시. 부하 실험 H9 진단용으로 바꿀 수 있다
+    memswap_limit: ${KAFKA_MEMSWAP_LIMIT:-${KAFKA_MEM_LIMIT:-2g}}   # 메모리+swap 합계 = mem_limit → swap 금지 (H9b, docs/step5-load.md 10절)
     healthcheck:
       test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1"]
       interval: 10s
@@ -67,6 +68,7 @@ services:
         soft: 262144
         hard: 262144
     mem_limit: 3g
+    memswap_limit: ${CLICKHOUSE_MEMSWAP_LIMIT:-3g}   # = mem_limit → swap 금지 (H9b)
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8123/ping | grep -q Ok"]
       interval: 10s
@@ -91,7 +93,8 @@ services:
     volumes:
       - seaweedfs-data:/data
       - ./seaweedfs/s3.json:/etc/seaweedfs/s3.json:ro
-    mem_limit: 512m
+    mem_limit: ${SEAWEEDFS_MEM_LIMIT:-1g}   # H9b: 512m에서는 swap 포함 약 800 MiB를 썼다
+    memswap_limit: ${SEAWEEDFS_MEMSWAP_LIMIT:-${SEAWEEDFS_MEM_LIMIT:-1g}}   # = mem_limit → swap 금지 (H9b)
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:9333/cluster/status > /dev/null && wget -q -S -O /dev/null http://localhost:8333/ 2>&1 | grep -q 'HTTP/'"]
       interval: 10s
@@ -146,7 +149,8 @@ services:
         condition: service_healthy
       seaweedfs:
         condition: service_healthy
-    mem_limit: 5g                         # ADR 0005: 4 → 5 GB (보존 쿼리 추가, 3단계에서 3.54 / 4 GiB 관측)
+    mem_limit: ${SPARK_MEM_LIMIT:-7g}     # ADR 0005: 4 → 5 GB, 5단계 H9b: 5 → 7 GB (swap 없이 10,000/s에서 약 6.0 GiB 사용)
+    memswap_limit: ${SPARK_MEMSWAP_LIMIT:-${SPARK_MEM_LIMIT:-7g}}   # = mem_limit → swap 금지. docker 기본값은 메모리의 2배 swap 허용 (H9b)
 
 volumes:
   kafka-data:
