@@ -4,14 +4,22 @@
 # 사용법 (WSL 레포 루트): bash infra/scripts/spark_batch.sh <src 기준 스크립트 경로> [인자...]
 #   bash infra/scripts/spark_batch.sh reprocess/verify_archive.py
 #
-# 메모리: 스트리밍 spark(5 GB)와 동시에 돌 수 있으므로 3 GB로 제한한다 (WSL 16 GB 배분, ADR 0002·0005).
+# 메모리: swap은 막는다 (--memory-swap = --memory, docs/step5-load.md 10절 H9b).
+# 3 GB에서는 swap 없이 재처리가 OOM으로 죽었다 (예전에는 swap을 써서 버텼다). 기본 6 GB (SPARK_BATCH_MEM, 5 GB에서 최대 4,980 MiB로 한도에 닿았다).
+# 스트리밍 spark(7 GB)와 동시에 돌리면 WSL 16 GB를 넘으므로, 재처리는 스트리밍 spark를 멈춘 상태에서 돌린다.
 
 set -euo pipefail
 
 SCRIPT=$1; shift
-docker run --rm --name spark-batch --network capstone2_default --memory 3g \
+MEM=${SPARK_BATCH_MEM:-6g}
+MEMSWAP=${SPARK_BATCH_MEMSWAP:-$MEM}   # 비교 실험용. MEM보다 크면 그 차이만큼 swap을 허용한다 (5단계 이전 동작: 3g / 6g)
+if [ "$(docker inspect -f '{{.State.Running}}' spark 2>/dev/null)" = "true" ]; then
+  echo "warning: streaming spark is running; spark-batch ($MEM) may exceed WSL memory" >&2
+fi
+docker run --rm --name spark-batch --network capstone2_default --memory "$MEM" --memory-swap "$MEMSWAP" \
   -v "$PWD/src:/opt/app/src:ro" -v "$PWD/models:/opt/app/models:ro" \
   -e PYTHONDONTWRITEBYTECODE=1 \
+  -e REPROCESS_FILTER_BEFORE_PARSE="${REPROCESS_FILTER_BEFORE_PARSE:-true}" \
   -e PYTHONPATH=/opt/app/src/streaming:/opt/app/src/extract:/opt/app/src/reprocess \
   -e MODEL_DIR="/opt/app/models/${MODEL_VERSION:-xgb-20261027-1cc0f57c}" \
   -e S3_ENDPOINT=http://seaweedfs:8333 -e S3_ACCESS_KEY=capstone -e S3_SECRET_KEY=capstone-dev-secret \

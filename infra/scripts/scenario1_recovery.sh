@@ -51,6 +51,9 @@ for t in flows_raw flows_rejected pipeline_batches; do ch "TRUNCATE TABLE capsto
 ch "SELECT (SELECT count() FROM capstone.flows_raw) AS raw, (SELECT count() FROM capstone.flows_rejected) AS rejected FORMAT TSVWithNames"
 
 log "5. S3 보존본으로 재처리"
+# 스트리밍 spark(7 GB)와 배치 컨테이너(3 GB)를 같이 띄우면 한도 합계가 WSL 16 GB를 넘는다 (step5-load.md 10절).
+# 원본이 Kafka에 없는 상황이라 스트리밍 잡이 할 일도 없다
+docker stop spark >/dev/null 2>&1 || true
 T0=$(date +%s)
 bash infra/scripts/spark_batch.sh reprocess/reprocess_archive.py | grep -E "^model:|^archive:|^\[batch|^reprocess done"
 echo "reprocess wall time: $(( $(date +%s) - T0 ))s"
