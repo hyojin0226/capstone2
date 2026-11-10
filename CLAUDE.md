@@ -143,4 +143,6 @@ docs/              # 설계 결정 기록(ADR), 성능 실험 결과
   - [x] 집계 뷰 (`infra/clickhouse/schema/007_aggregation_views.sql`): flows_dedup, traffic_by_class_10s/1m, quality_by_window, pipeline_latency_by_window, pipeline_batches_dedup
     - `verify_views.py` 검증 3종 통과: 합계 일치(364,054), 장애 직후 OPTIMIZE 전 중복 189행 상태에서도 집계 동일, 재추론 A→B→A 반영. 운영 모델 A로 복구
     - verify_step3 배치 합계 검사를 스트리밍/재처리 그룹별로 고침 (15/15)
-  - [ ] Grafana 프로비저닝 → 패널 비용 → 증폭 주입·알림·탐지 지연 → lag 패널 → dbt
+  - [x] Grafana 프로비저닝: grafana 13.2.5 + ClickHouse 플러그인 4.22.1, 조회 전용 `grafana_ro`(008, readonly=2·상한 30초/1 GB), 대시보드 12패널 (`grafana/build_dashboards.py`)
+    - `verify_grafana.py` 20/20: 패널 값 = ClickHouse 직접 조회, 빈 볼륨에서 재시작해도 같은 구성. 플러그인은 queryTimeout + 4초를 보낸다 → queryTimeout 20
+  - [ ] 패널 비용 → 증폭 주입·알림·탐지 지연 → lag 패널 → dbt

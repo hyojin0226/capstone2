@@ -1,0 +1,20 @@
+# ClickHouse 데이터소스 (공식 플러그인 grafana-clickhouse-datasource 4.22.1). ADR 0007 결정 2
+# 조회 전용 사용자 grafana_ro (infra/clickhouse/schema/008_grafana_user.sql). 값은 compose 환경 변수에서 읽는다
+apiVersion: 1
+datasources:
+  - name: ClickHouse
+    uid: clickhouse
+    type: grafana-clickhouse-datasource
+    isDefault: true
+    editable: false
+    jsonData:
+      host: clickhouse
+      port: 9000
+      protocol: native
+      secure: false
+      username: $GRAFANA_CH_USER
+      defaultDatabase: capstone
+      dialTimeout: 10
+      queryTimeout: "20"        # 플러그인은 이 값 + 4초를 max_execution_time으로 보낸다 (실측 20 → 24). grafana_ro 상한 30초 안에 둔다
+    secureJsonData:
+      password: $GRAFANA_CH_PASSWORD

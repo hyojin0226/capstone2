@@ -373,3 +373,28 @@ python infra/scripts/verify_views.py compare /tmp/views_pre.json
 ```bash
 python infra/scripts/verify_views.py reinference xgb-20261027-1cc0f57c
 ```
+
+## 6단계: Grafana (ADR 0007 결정 1, 2)
+
+조회 전용 ClickHouse 사용자를 만들고 (ClickHouse 볼륨을 새로 만들었을 때 한 번), Grafana를 띄운다:
+
+```bash
+docker exec clickhouse clickhouse-client --user capstone --password capstone-dev --queries-file /schema/008_grafana_user.sql
+```
+
+```bash
+docker compose -f infra/docker-compose.yml up -d grafana
+```
+
+http://localhost:3000 (admin / 로컬 테스트 비밀번호 `infra/.env.example`) → Dashboards → Capstone → "Capstone 파이프라인".
+대시보드를 고칠 때는 `grafana/build_dashboards.py`를 고치고 JSON을 다시 만든다 (30초 안에 반영):
+
+```bash
+python grafana/build_dashboards.py
+```
+
+프로비저닝 검증 (적재가 멈춘 상태에서):
+
+```bash
+python infra/scripts/verify_grafana.py
+```

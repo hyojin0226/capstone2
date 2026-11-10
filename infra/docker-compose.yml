@@ -152,8 +152,47 @@ services:
     mem_limit: ${SPARK_MEM_LIMIT:-7g}     # ADR 0005: 4 → 5 GB, 5단계 H9b: 5 → 7 GB (swap 없이 10,000/s에서 약 6.0 GiB 사용)
     memswap_limit: ${SPARK_MEMSWAP_LIMIT:-${SPARK_MEM_LIMIT:-7g}}   # = mem_limit → swap 금지. docker 기본값은 메모리의 2배 swap 허용 (H9b)
 
+  grafana:
+    # 대시보드·알림 (ADR 0007 결정 1, 2). 데이터소스·대시보드·알림 규칙은 ../grafana/에서 프로비저닝한다
+    image: grafana/grafana:13.2.5
+    container_name: grafana
+    restart: unless-stopped
+    hostname: grafana
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-capstone-dev}   # 로컬 개발용 테스트 값. infra/.env.example
+      # 플러그인 버전 고정 설치 (처음 시작할 때 한 번 내려받고, grafana-data 볼륨에 남는다)
+      GF_PLUGINS_PREINSTALL_SYNC: grafana-clickhouse-datasource@4.22.1
+      # 데이터소스 프로비저닝 파일이 읽는 값 (조회 전용 사용자, 008_grafana_user.sql)
+      GRAFANA_CH_USER: grafana_ro
+      GRAFANA_CH_PASSWORD: ${GRAFANA_CH_PASSWORD:-grafana-ro-dev}
+      # 외부 통신 끄기: 사용 통계, 업데이트 확인, 뉴스
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: "false"
+      GF_NEWS_NEWS_FEED_ENABLED: "false"
+      GF_USERS_DEFAULT_THEME: light
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ../grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../grafana/dashboards:/etc/grafana/dashboards:ro
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    mem_limit: ${GRAFANA_MEM_LIMIT:-512m}
+    memswap_limit: ${GRAFANA_MEMSWAP_LIMIT:-${GRAFANA_MEM_LIMIT:-512m}}   # = mem_limit → swap 금지 (H9b)
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health | grep -q '\"database\": *\"ok\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
 volumes:
   kafka-data:
   clickhouse-data:
   spark-checkpoints:
   seaweedfs-data:
+  grafana-data:
