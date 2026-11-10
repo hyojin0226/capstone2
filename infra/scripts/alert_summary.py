@@ -8,7 +8,7 @@
   - pred_ratio_max / label_ratio_max: 주입 구간의 10초 윈도우 중 최대 "윈도우 / 직전 30개 윈도우 평균"
     (예측 클래스 = 알림이 보는 값, 라벨 클래스 = 실제로 주입한 값). 둘의 차이가 모델 오분류의 영향이다
 실행 전체
-  - false_alerts: 탐지로 보지 않은 Alerting 전이 수 (다른 클래스, 구간 밖)
+  - false_alerts: 탐지로 보지 않은 Alerting 전이. kind=false(다른 클래스, 구간 밖) / refire(같은 구간에서 다시 울림)
 결과는 data/loadtest/alert_test.csv(구간별), alert_false.csv(오탐)에 덧붙인다.
 """
 
@@ -106,8 +106,12 @@ def main() -> None:
                          pred_ratio_max=round(float(inwin(pred).ratio.max()), 2),
                          label_ratio_max=round(float(inwin(lab).ratio.max()), 2),
                          base_per_10s=round(float(inwin(pred).base.iloc[0]), 1) if len(inwin(pred)) else ""))
+    # 탐지로 쓰지 않은 전이: 같은 구간 안에서 Normal → Alerting이 다시 일어난 것(refire)은 오탐이 아니다
+    in_episode = lambda t: any(t["cls"] == ep["cls"] and ep["start_ms"] <= t["t_ms"] <= ep["end_ms"] + DETECT_GRACE_MS
+                               for ep in eps)
     false = [dict(run_id=run_id, rate=a.rate, factor=a.factor, stress=a.stress, t_ms=t["t_ms"],
-                  after_start_s=round((t["t_ms"] - start_ms) / 1000), cls=t["cls"], values=t["value"])
+                  after_start_s=round((t["t_ms"] - start_ms) / 1000), cls=t["cls"],
+                  kind="refire" if in_episode(t) else "false", values=t["value"])
              for t in trans if id(t) not in used]
     minutes = (end_ms - start_ms) / 60000
 
@@ -115,11 +119,12 @@ def main() -> None:
     for r in rows:
         print(f"  episode {r['episode']} {r['cls']} x{r['factor']}: detected {r['detected']} latency {r['latency_s']} s | "
               f"pred ratio max {r['pred_ratio_max']} | label ratio max {r['label_ratio_max']} | base {r['base_per_10s']}/10s")
-    print(f"  false alerts: {len(false)}" + "".join(f"\n    +{f['after_start_s']}s {f['cls']} {f['values']}" for f in false))
+    print(f"  false alerts: {sum(f['kind'] == 'false' for f in false)}, refires: {sum(f['kind'] == 'refire' for f in false)}"
+          + "".join(f"\n    {f['kind']} +{f['after_start_s']}s {f['cls']} {f['values']}" for f in false))
     OUT.mkdir(parents=True, exist_ok=True)
     for name, data in (("alert_test.csv", rows), ("alert_false.csv", false or [dict(
             run_id=run_id, rate=a.rate, factor=a.factor, stress=a.stress, t_ms="", after_start_s="", cls="(none)",
-            values=f"minutes={minutes:.1f}")])):
+            kind="", values=f"minutes={minutes:.1f}")])):
         path = OUT / name
         new = not path.exists()
         with open(path, "a", newline="") as fh:

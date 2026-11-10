@@ -401,3 +401,19 @@ python infra/scripts/verify_grafana.py
 
 대시보드 운영 범위 (docs/step6-dashboard.md 3절): 10초 새로고침은 `flows_raw` 약 1,500만 행 이하에서 패널 p95 ≤ 1초다
 (10,000/s 약 25분, 5,000/s 약 50분). 더 긴 실행은 새로고침을 30초 이상으로 늘린다. TTL은 두지 않는다.
+
+급증 알림 탐지 측정 (docs/step6-dashboard.md 4절). 토픽·테이블을 초기화하고, 증폭 구간 5개(330초 간격, 30초씩)를 주입한다:
+
+```bash
+bash infra/scripts/alert_test.sh 2000 5
+```
+
+정상 트래픽 30분 오탐 측정 / Spark 재시작 직후 주입:
+
+```bash
+DURATION=1800 bash infra/scripts/alert_test.sh 5000 0
+```
+
+```bash
+STRESS=1 bash infra/scripts/alert_test.sh 5000 5 3
+```
