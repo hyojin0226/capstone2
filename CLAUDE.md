@@ -145,4 +145,7 @@ docs/              # 설계 결정 기록(ADR), 성능 실험 결과
     - verify_step3 배치 합계 검사를 스트리밍/재처리 그룹별로 고침 (15/15)
   - [x] Grafana 프로비저닝: grafana 13.2.5 + ClickHouse 플러그인 4.22.1, 조회 전용 `grafana_ro`(008, readonly=2·상한 30초/1 GB), 대시보드 12패널 (`grafana/build_dashboards.py`)
     - `verify_grafana.py` 20/20: 패널 값 = ClickHouse 직접 조회, 빈 볼륨에서 재시작해도 같은 구성. 플러그인은 queryTimeout + 4초를 보낸다 → queryTimeout 20
-  - [ ] 패널 비용 → 증폭 주입·알림·탐지 지연 → lag 패널 → dbt
+  - [x] 패널 비용 (`panel_cost.py`, step6-dashboard 3절): 패널 쿼리가 flows_raw 전체를 읽어 비용이 행 수에 비례.
+    기준(p95 ≤ 1초, CPU ≤ 50%)은 insert 직후 약 1,500만 행까지. 품질 뷰 이중 스캔 제거(3.6 → 1.8초).
+    TTL은 적용하지 않음을 제안(25분 TTL이 필요하고 검증 절차를 깨뜨림) → 운영 범위 문서화, 오탐 30분 측정은 5,000/s. 사용자 확인 대기
+  - [ ] 증폭 주입·알림·탐지 지연 → lag 패널 → dbt

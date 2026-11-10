@@ -63,18 +63,22 @@ FROM
     FROM capstone.flows_rejected FINAL
     GROUP BY window_start, metric
     UNION ALL
-    SELECT toStartOfInterval(fromUnixTimestamp64Milli(replay_sent_ms), INTERVAL 10 SECOND), 'flagged', countIf(NOT quality_ok)
-    FROM capstone.flows_raw FINAL
-    WHERE fault_type = ''
-    GROUP BY 1
-    UNION ALL
     SELECT toStartOfInterval(fromUnixTimestamp64Milli(kafka_timestamp_ms), INTERVAL 10 SECOND), 'injected', countIf(fault_type != '')
     FROM capstone.flows_rejected FINAL
     GROUP BY 1
     UNION ALL
-    SELECT toStartOfInterval(fromUnixTimestamp64Milli(replay_sent_ms), INTERVAL 10 SECOND), 'injected', countIf(fault_type != '')
-    FROM capstone.flows_raw FINAL
-    GROUP BY 1
+    -- flows_raw는 한 번만 읽는다 (flag 수와 주입 수를 같은 스캔에서 센다). 두 번 읽으면 이 패널이 다른 패널의 두 배 비용이다
+    -- (docs/step6-dashboard.md 3절: 7,200만 행에서 p95 20.8초)
+    SELECT window_start, m.1, m.2
+    FROM
+    (
+        SELECT toStartOfInterval(fromUnixTimestamp64Milli(replay_sent_ms), INTERVAL 10 SECOND) AS window_start,
+               countIf(fault_type = '' AND NOT quality_ok) AS flagged,
+               countIf(fault_type != '') AS injected
+        FROM capstone.flows_raw FINAL
+        GROUP BY window_start
+    )
+    ARRAY JOIN [('flagged', flagged), ('injected', injected)] AS m
 )
 GROUP BY window_start, metric;
 
