@@ -4,7 +4,7 @@
 
 규칙 (ADR 0007 결정 3):
   - 007 집계 뷰(flows_dedup, traffic_by_class_*, quality_by_window, pipeline_latency_by_window, pipeline_batches_dedup)와
-    realtime_holdout_accuracy만 조회한다. flows_raw 같은 테이블을 직접 조회하면 merge 전 중복이 섞인다.
+    realtime_holdout_accuracy, pipeline_lag만 조회한다 (pipeline_lag는 lag_reporter 하나가 추가만 하는 테이블이라 중복이 없다). flows_raw 같은 테이블을 직접 조회하면 merge 전 중복이 섞인다.
   - 모든 시계열 쿼리에 $__timeFilter(윈도우 열) 범위 조건을 건다.
   - 시계열은 긴 형식(time, 이름, 값)으로 돌려주면 플러그인이 이름별 시리즈로 바꾼다.
 """
@@ -126,6 +126,21 @@ SELECT model_version, service_class, support, correct, predicted,
 FROM capstone.realtime_holdout_accuracy
 ORDER BY model_version, service_class""", TABLE)],
           "학습에서 뺀 세션의 플로우에 대한 스트리밍 추론 결과 (ADR 0003 결정 6). 시간 범위와 무관"),
+
+    # 5행: Kafka lag (infra/scripts/lag_reporter.py가 떠 있을 때만 값이 있다, ADR 0007 결정 7)
+    ts("Kafka lag: 처리 안 된 메시지 (파티션별)", (0, 37, 12, 8), """
+SELECT ts AS time, concat('p', toString(partition)) AS partition, lag
+FROM capstone.pipeline_lag
+WHERE $__timeFilter(ts)
+ORDER BY time""", "Kafka 끝 offset − 적재까지 끝난 offset(pipeline_batches.end_offsets). 계속 늘면 유입을 못 따라가는 중. "
+       "lag_reporter.py가 꺼져 있으면 비어 있다", stack=True, label="partition"),
+    ts("마지막 스트리밍 배치 후 경과", (12, 37, 12, 8), """
+SELECT ts AS time, 'age' AS metric, max(last_batch_age_s) AS age
+FROM capstone.pipeline_lag
+WHERE $__timeFilter(ts) AND last_batch_age_s >= 0
+GROUP BY time
+ORDER BY time""", "유입이 있는데 이 값이 트리거 간격(5초)보다 계속 크면 Spark가 멈췄거나 배치 하나가 오래 걸리는 중. "
+       "유입이 없을 때는 계속 늘어나는 것이 정상", unit="s", label="metric"),
 ]
 
 dashboard = {

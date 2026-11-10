@@ -151,4 +151,6 @@ docs/              # 설계 결정 기록(ADR), 성능 실험 결과
   - [x] 증폭 주입·알림·탐지 지연 (step6-dashboard 4절): `--amplify`, `--shuffle`(타임라인 앞쪽 몰림 제거), 급증 규칙(닫힌 10초 윈도우 / 직전 5분, L 15초, K 3)
     탐지 ×3 0/10, ×5 9/10, ×8 10/10 (예측 비율 ≈ 라벨의 0.7배, F2·오분류). 지연 p50 35.1초 / p95 47.8초(목표 30초 초과: 부분 윈도우 + L + 평가 주기).
     오탐 30분 0건, Spark 재시작 직후 3/3. WSL wall clock이 부하 중 monotonic보다 약 9.5% 빠름 → 구간은 wall clock 기준
-  - [ ] lag 패널 → dbt
+  - [x] Kafka lag 패널 (step6-dashboard 5절): `lag_reporter.py` → `pipeline_lag`(009), 패널 2개(파티션별 lag, 마지막 배치 후 경과). verify_grafana 22/22.
+    Spark 40초 정지 시 lag 21.7만(예상 22.9만), 재시작 후 53초에 정상 복귀(28초는 Spark 기동)
+  - [ ] dbt

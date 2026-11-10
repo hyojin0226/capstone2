@@ -417,3 +417,19 @@ DURATION=1800 bash infra/scripts/alert_test.sh 5000 0
 ```bash
 STRESS=1 bash infra/scripts/alert_test.sh 5000 5 3
 ```
+
+Kafka lag 패널 (docs/step6-dashboard.md 5절). 테이블을 한 번 만들고(ClickHouse 볼륨을 새로 만들었을 때), 실험·시연 중에 reporter를 띄워 둔다:
+
+```bash
+docker exec -i clickhouse clickhouse-client --user capstone --password capstone-dev --multiquery < infra/clickhouse/schema/009_pipeline_lag.sql
+```
+
+```bash
+python infra/scripts/lag_reporter.py
+```
+
+lag 검증 (Spark를 90초에 죽이고 40초 뒤 재시작):
+
+```bash
+bash infra/scripts/lag_test.sh 5000 300
+```

@@ -37,6 +37,7 @@ $CH -q "TRUNCATE TABLE capstone.flows_raw"
 $CH -q "TRUNCATE TABLE IF EXISTS capstone.flows_rejected"
 $CH -q "TRUNCATE TABLE IF EXISTS capstone.pipeline_batches"
 $CH -q "TRUNCATE TABLE IF EXISTS capstone.flow_predictions"
+$CH -q "TRUNCATE TABLE IF EXISTS capstone.pipeline_lag"
 
 # 4. 원본 보존본 (SeaweedFS). 이전 offset의 보존본과 섞이면 안 된다 (ADR 0005)
 echo "fs.rm -r /buckets/capstone-raw/flows.raw" | docker exec -i seaweedfs weed shell -master=localhost:9333 >/dev/null 2>&1 || true

@@ -127,6 +127,9 @@
 | **작은 lag 기록 스크립트 (채택 제안)** | `infra/scripts/lag_reporter.py`가 5초마다 Kafka 끝 오프셋(이미 쓰는 confluent-kafka)과 `pipeline_batches.end_offsets`를 비교해 ClickHouse `pipeline_lag` 테이블에 쓴다. 새 라이브러리가 없다. 실험·시연 때 venv에서 띄운다 |
 | kafka-exporter + Prometheus | 표준적인 방법이지만 서비스 2개가 늘고 메모리 예산을 쓴다. 이 프로젝트 범위에 비해 크다 |
 
+- **결과 (2026-11-10, docs/step6-dashboard.md 5절):** 채택안대로 구현했다 (`009_pipeline_lag.sql`, `lag_reporter.py`, 패널 2개).
+  - 5,000/s에서 Spark를 40초 멈추면 lag이 21.7만(예상 22.9만)까지 늘었다. 재시작 뒤 53초 만에 정상 범위로 돌아왔고, 그중 28초가 Spark 기동이다.
+
 ## 결정 8. dbt (새 도구, 승인 필요)
 
 | 대안 | 판단 |
