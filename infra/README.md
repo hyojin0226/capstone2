@@ -398,3 +398,6 @@ python grafana/build_dashboards.py
 ```bash
 python infra/scripts/verify_grafana.py
 ```
+
+대시보드 운영 범위 (docs/step6-dashboard.md 3절): 10초 새로고침은 `flows_raw` 약 1,500만 행 이하에서 패널 p95 ≤ 1초다
+(10,000/s 약 25분, 5,000/s 약 50분). 더 긴 실행은 새로고침을 30초 이상으로 늘린다. TTL은 두지 않는다.
