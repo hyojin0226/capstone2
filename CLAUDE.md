@@ -138,4 +138,9 @@ docs/              # 설계 결정 기록(ADR), 성능 실험 결과
     필터 위치 변경 가설은 기각(오히려 느림)하고 되돌림. 시나리오 ② 재검증 통과
   - T4(13절): raw_value를 거부 행에만 남겨도 처리량·prepare·메모리 차이 없음 → H3 기각, 변경 되돌림 (검증은 모두 통과했었음)
   - 6단계로 넘길 것: flows_raw TTL·B4 검토, H9c(swap 아닌 I/O 대기), 고부하 중 재추론 동시 실행
-- [ ] 6단계 dbt·Grafana·이상 주입 알림 검증 — 계획: docs/status-and-plan.md, 설계: docs/adr/0007-dashboard-alerting-dbt.md (제안, 승인 대기)
+- [ ] 6단계 dbt·Grafana·이상 주입 알림 검증 — 계획: docs/status-and-plan.md, 설계: docs/adr/0007-dashboard-alerting-dbt.md (채택 2026-11-10)
+  - 구현 기록: docs/step6-dashboard.md
+  - [x] 집계 뷰 (`infra/clickhouse/schema/007_aggregation_views.sql`): flows_dedup, traffic_by_class_10s/1m, quality_by_window, pipeline_latency_by_window, pipeline_batches_dedup
+    - `verify_views.py` 검증 3종 통과: 합계 일치(364,054), 장애 직후 OPTIMIZE 전 중복 189행 상태에서도 집계 동일, 재추론 A→B→A 반영. 운영 모델 A로 복구
+    - verify_step3 배치 합계 검사를 스트리밍/재처리 그룹별로 고침 (15/15)
+  - [ ] Grafana 프로비저닝 → 패널 비용 → 증폭 주입·알림·탐지 지연 → lag 패널 → dbt

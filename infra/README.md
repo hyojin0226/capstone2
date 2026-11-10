@@ -347,3 +347,29 @@ bash infra/scripts/scenario2_reinference.sh xgb-20261027-1cc0f57c xgb-20261104-0
 ```bash
 docker exec clickhouse clickhouse-client --user capstone --password capstone-dev -q "SELECT model_version, sum(support) AS n_rows, sum(correct) AS n_correct, round(n_correct / n_rows, 4) AS accuracy, round(avg(f1), 4) AS macro_f1 FROM capstone.realtime_holdout_accuracy GROUP BY model_version"
 ```
+
+## 6단계: 집계 뷰 (ADR 0007 결정 3)
+
+Grafana·dbt가 조회하는 뷰 (`007`). 테이블이 아니라 이 뷰만 조회한다 (merge 전 중복 방지):
+
+```bash
+docker exec clickhouse clickhouse-client --user capstone --password capstone-dev --queries-file /schema/007_aggregation_views.sql
+```
+
+뷰 검증 (합계 일치 / 장애 직후 중복 내성 / 재추론 반영):
+
+```bash
+python infra/scripts/verify_views.py sums --replay-log /tmp/replay_archive.log
+```
+
+```bash
+PRE_OPTIMIZE_HOOK="python infra/scripts/verify_views.py snapshot /tmp/views_pre.json" bash infra/scripts/failure_test.sh
+```
+
+```bash
+python infra/scripts/verify_views.py compare /tmp/views_pre.json
+```
+
+```bash
+python infra/scripts/verify_views.py reinference xgb-20261027-1cc0f57c
+```

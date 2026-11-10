@@ -141,13 +141,17 @@ def main() -> None:
           f"class mismatches {int((both.pred_service_class != both.pred).sum())}, "
           f"max |conf diff| {float(np.abs(both.pred_confidence.astype('float32').to_numpy() - both.conf.to_numpy()).max())}")
 
-    # 6. 배치 지표
-    b = ch("SELECT sum(input_rows) i, sum(rejected_rows) r, sum(stored_rows) s, sum(flagged_rows) f, "
-           "sum(inferred_rows) n, sum(injected_rows) j FROM capstone.pipeline_batches FINAL").iloc[0]
+    # 6. 배치 지표. 스트리밍 배치(batch_id < 1,000,000)와 재처리 배치(≥ 1,000,000)는 같은 데이터를 각각 한 번씩 처리한 기록이다.
+    #    둘 다 있으면(예: 스트리밍 적재 뒤 시나리오 ② 재추론) 합치면 두 배가 된다 → 그룹마다 따로 테이블과 맞춘다 (docs/step6-dashboard.md)
+    groups = ch("SELECT batch_id >= 1000000 AS reprocess, sum(input_rows) i, sum(rejected_rows) r, sum(stored_rows) s, "
+                "sum(flagged_rows) f, sum(inferred_rows) n, sum(injected_rows) j "
+                "FROM capstone.pipeline_batches FINAL GROUP BY reprocess")
     expect = dict(i=sent, r=uniq_rej, s=uniq_raw, f=int((~raw.quality_ok).sum()), n=int(raw.inferred.sum()),
                   j=sum(injected.values()))
-    check("pipeline_batches totals = table counts", all(int(b[k]) == v for k, v in expect.items()),
-          f"batches {dict((k, int(b[k])) for k in expect)} vs tables {expect}")
+    for g in groups.itertuples():
+        name = "reprocess" if g.reprocess else "streaming"
+        got = {k: int(getattr(g, k)) for k in expect}
+        check(f"pipeline_batches ({name}) totals = table counts", got == expect, f"batches {got} vs tables {expect}")
 
     # 7. 실시간 held-out 정확도 = 오프라인 held-out 평가 (ADR 0003 결정 6)
     offline = meta.get("holdout", {}).get("offline_eval")

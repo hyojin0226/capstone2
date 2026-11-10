@@ -106,6 +106,11 @@ ch "SELECT (SELECT count() FROM capstone.flows_raw FINAL) AS raw_final, (SELECT 
            (SELECT count() FROM capstone.flows_rejected FINAL) AS rej_final, (SELECT uniqExact(kafka_partition, kafka_offset) FROM capstone.flows_rejected) AS rej_uniq,
            (SELECT count() FROM capstone.pipeline_batches FINAL) AS batches_final, (SELECT uniqExact(batch_id) FROM capstone.pipeline_batches) AS batches_uniq
     FORMAT Vertical"
+# 6단계: 중복이 테이블에 그대로 있는 이 시점에 추가 검증을 끼울 수 있다 (예: 집계 뷰 스냅샷, verify_views.py)
+if [ -n "${PRE_OPTIMIZE_HOOK:-}" ]; then
+  echo "== PRE_OPTIMIZE_HOOK"
+  bash -c "$PRE_OPTIMIZE_HOOK"
+fi
 echo "== OPTIMIZE TABLE ... FINAL 후 (FINAL 없이)"
 for t in flows_raw flows_rejected pipeline_batches; do ch "OPTIMIZE TABLE capstone.$t FINAL"; done
 ch "SELECT count() AS rows, uniqExact(flow_id) AS flows, rows - flows AS duplicates FROM capstone.flows_raw FORMAT Vertical"
