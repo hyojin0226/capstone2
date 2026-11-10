@@ -158,3 +158,5 @@ docs/              # 설계 결정 기록(ADR), 성능 실험 결과
   - [x] 6단계 마무리 문서: status-and-plan 갱신, step6-dashboard 7절(완료 기준·발표용 요약). 빈 Grafana 볼륨 재시작 시 알림 규칙도 파일에서 다시 뜸, verify_grafana 22/22
     - 주의: verify_grafana는 스트리밍 적재 + lag reporter가 돈 뒤 실행 (재처리 직후엔 배치·lag 패널이 비어 18/22)
 - [ ] 7단계 문서화·발표 준비 — 계획: docs/status-and-plan.md 4절 (README, docs/results.md, ADR 색인, 재현 가이드, 시연)
+  - [x] README.md 전면 개정 (결과 표, 아키텍처, 구성 요소, 실행, 문서 지도), docs/results.md (KPI별 결과·근거), docs/adr/README.md (ADR 색인), infra/README 서비스 표 갱신
+  - [ ] 재현 가이드 (빈 볼륨에서 README 실행 절차를 처음부터 검증), 발표 자료, 시연 리허설

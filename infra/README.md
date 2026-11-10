@@ -1,14 +1,18 @@
 # infra
 
-2단계 최소 파이프라인용 docker-compose. 설계 근거와 이미지 버전: [docs/adr/0002-pipeline-design.md](../docs/adr/0002-pipeline-design.md)
+파이프라인 전체를 띄우는 docker-compose와 단계별 실행·검증 명령. 설계 근거와 이미지 버전: [docs/adr/](../docs/adr/README.md) (최소 파이프라인은 0002)
 
-Kafka, ClickHouse, Spark 스트리밍 잡을 띄운다. replay는 호스트 venv에서 `localhost:9094`로 보낸다.
+Kafka, ClickHouse, SeaweedFS, Spark 스트리밍 잡, Grafana를 띄운다. replay는 호스트 venv에서 `localhost:9094`로 보낸다.
 
-| 서비스 | 이미지 | 호스트 포트 (127.0.0.1) | 메모리 한도 |
+| 서비스 | 이미지 | 호스트 포트 (127.0.0.1) | 메모리 한도 (swap 금지) |
 |---|---|---|---|
 | kafka | `apache/kafka:4.3.2` (KRaft 단일 노드) | 9094 (호스트용 리스너) | 2 GB |
 | clickhouse | `clickhouse/clickhouse-server:26.8.35.10` | 8123 (HTTP), 9000 (native) | 3 GB |
-| spark | `capstone2/spark:4.1.3` (`infra/spark/Dockerfile`로 빌드) | 4040 (Spark UI) | 4 GB |
+| seaweedfs | `chrislusf/seaweedfs:4.48` (S3, 7절) | 8333 (S3 API) | 1 GB |
+| spark | `capstone2/spark:4.1.3` (`infra/spark/Dockerfile`로 빌드) | 4040 (Spark UI) | 7 GB |
+| grafana | `grafana/grafana:13.2.5` (6단계) | 3000 | 512 MB |
+
+메모리 한도는 5단계(H9b)에서 정했다. `memswap_limit`을 `mem_limit`과 같게 두어 swap을 막는다 ([docs/step5-load.md](../docs/step5-load.md) 10절).
 
 명령은 모두 WSL의 레포 루트(`~/capstone2`)에서 실행한다.
 
@@ -259,7 +263,7 @@ PRODUCER_ARGS="--inject-faults 0.01" bash infra/scripts/failure_test.sh 50 10000
 
 | 서비스 | 이미지 | 호스트 포트 (127.0.0.1) | 메모리 한도 |
 |---|---|---|---|
-| seaweedfs | `chrislusf/seaweedfs:4.48` (`weed mini`, MinIO 대체) | 8333 (S3 API) | 512 MB |
+| seaweedfs | `chrislusf/seaweedfs:4.48` (`weed mini`, MinIO 대체) | 8333 (S3 API) | 1 GB (5단계에서 512 MB → 1 GB) |
 
 - 버킷 `capstone-raw`, `capstone-models`는 시작할 때 만들어진다. 접근 키는 `infra/seaweedfs/s3.json`(로컬 개발용)에 있다.
 - Spark 앱 안의 보존 쿼리가 `s3a://capstone-raw/flows.raw/dt=…/hr=…/`에 1분마다 Parquet(zstd)을 쓴다. 체크포인트는 `/checkpoints/archive`다.
