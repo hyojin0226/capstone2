@@ -138,7 +138,7 @@ docs/              # 설계 결정 기록(ADR), 성능 실험 결과
     필터 위치 변경 가설은 기각(오히려 느림)하고 되돌림. 시나리오 ② 재검증 통과
   - T4(13절): raw_value를 거부 행에만 남겨도 처리량·prepare·메모리 차이 없음 → H3 기각, 변경 되돌림 (검증은 모두 통과했었음)
   - 6단계로 넘길 것: flows_raw TTL·B4 검토, H9c(swap 아닌 I/O 대기), 고부하 중 재추론 동시 실행
-- [ ] 6단계 dbt·Grafana·이상 주입 알림 검증 — 계획: docs/status-and-plan.md, 설계: docs/adr/0007-dashboard-alerting-dbt.md (채택 2026-11-10)
+- [x] 6단계 dbt·Grafana·이상 주입 알림 검증 (2026-11-10 완료, 요약 docs/step6-dashboard.md 7절) — 계획: docs/status-and-plan.md, 설계: docs/adr/0007-dashboard-alerting-dbt.md (채택 2026-11-10)
   - 구현 기록: docs/step6-dashboard.md
   - [x] 집계 뷰 (`infra/clickhouse/schema/007_aggregation_views.sql`): flows_dedup, traffic_by_class_10s/1m, quality_by_window, pipeline_latency_by_window, pipeline_batches_dedup
     - `verify_views.py` 검증 3종 통과: 합계 일치(364,054), 장애 직후 OPTIMIZE 전 중복 189행 상태에서도 집계 동일, 재추론 A→B→A 반영. 운영 모델 A로 복구
@@ -155,4 +155,6 @@ docs/              # 설계 결정 기록(ADR), 성능 실험 결과
     Spark 40초 정지 시 lag 21.7만(예상 22.9만), 재시작 후 53초에 정상 복귀(28초는 Spark 기동)
   - [x] dbt (step6-dashboard 6절): dbt-core 1.12.6 + dbt-clickhouse 1.10.3 (`.venv-dbt`), `capstone_dbt`에 stg_flows, traffic_hourly·quality_hourly(insert_overwrite 시간 파티션), model_accuracy_daily.
     테스트 14개(원천 합계 일치, 키 유일, 정확도 일관성) — 일부러 넣은 중복을 잡는 것 확인. `dbt_reprocess_test.sh`: 증분 재실행·시나리오 ① 재빌드 지문 동일, 시나리오 ② B 분포 반영
-  - [ ] 6단계 마무리 문서 (status-and-plan, 발표용 요약)
+  - [x] 6단계 마무리 문서: status-and-plan 갱신, step6-dashboard 7절(완료 기준·발표용 요약). 빈 Grafana 볼륨 재시작 시 알림 규칙도 파일에서 다시 뜸, verify_grafana 22/22
+    - 주의: verify_grafana는 스트리밍 적재 + lag reporter가 돈 뒤 실행 (재처리 직후엔 배치·lag 패널이 비어 18/22)
+- [ ] 7단계 문서화·발표 준비 — 계획: docs/status-and-plan.md 4절 (README, docs/results.md, ADR 색인, 재현 가이드, 시연)
