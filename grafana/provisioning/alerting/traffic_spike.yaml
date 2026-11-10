@@ -1,0 +1,61 @@
+# 트래픽 급증 알림 (ADR 0007 결정 5). 클래스(예측 클래스)마다 하나의 알림 인스턴스가 생긴다.
+#
+# 규칙: 마지막 "닫힌" 10초 윈도우의 플로우 수 / 직전 5분(10초 윈도우 30개) 평균 > K(3)
+#   - 닫힌 윈도우 = window_end ≤ now − L. L = 15초 (E2E p95를 덮는 허용 지연). 늦게 온 행이 평가한 값을 바꾸지 않게 한다
+#   - 최소 건수 20: 작은 수의 흔들림(예: 2 → 7)으로 울리지 않게 한다
+#   - 기준선 윈도우가 24개(4분) 미만이면 평가하지 않는다 (실행 시작 직후 오탐 방지). 이때 값은 0
+#   - pending 0초: 한 번만 넘어도 Alerting. 오탐을 보고 조정한다
+# 쿼리는 ClickHouse 숫자 열 하나(ratio)와 문자열 열 하나(traffic_class)를 돌려준다 → 클래스가 알림 라벨이 된다.
+# 탐지 시각은 상태 이력(/api/v1/rules/history)의 Alerting 전이 시각으로 잰다 (infra/scripts/alert_test.sh).
+apiVersion: 1
+groups:
+  - orgId: 1
+    name: traffic-spike
+    folder: Capstone
+    interval: 10s
+    rules:
+      - uid: traffic-spike
+        title: 트래픽 급증 (예측 클래스, 10초 윈도우 / 5분 평균)
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 600, to: 0}
+            datasourceUid: clickhouse
+            model:
+              refId: A
+              editorType: sql
+              format: 1
+              queryType: table
+              rawSql: |-
+                WITH toStartOfInterval(now() - INTERVAL 15 SECOND, INTERVAL 10 SECOND) - INTERVAL 10 SECOND AS last_closed
+                SELECT traffic_class,
+                       if(base_windows >= 24 AND cur >= 20, cur / greatest(base, 1), 0) AS ratio
+                FROM
+                (
+                    SELECT traffic_class,
+                           sumIf(flows, window_start = last_closed) AS cur,
+                           sumIf(flows, window_start < last_closed) / 30 AS base,
+                           uniqExactIf(window_start, window_start < last_closed) AS base_windows
+                    FROM capstone.traffic_by_class_10s
+                    WHERE window_start >= last_closed - INTERVAL 300 SECOND AND window_start <= last_closed
+                      AND traffic_class NOT IN ('background', 'unclassified')
+                    GROUP BY traffic_class
+                )
+          - refId: C
+            datasourceUid: __expr__
+            relativeTimeRange: {from: 600, to: 0}
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: {type: gt, params: [3]}
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        isPaused: false
+        labels:
+          kind: traffic_spike
+        annotations:
+          summary: "{{ $labels.traffic_class }} 트래픽이 직전 5분 평균의 {{ humanize $values.A.Value }}배"
+          description: 마지막 닫힌 10초 윈도우(now − 15초 이전) 기준. 예측 클래스라서 모델 오분류 영향이 섞인다 (ADR 0007 결정 5)

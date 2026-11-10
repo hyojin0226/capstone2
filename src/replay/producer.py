@@ -5,6 +5,7 @@
     python src/replay/producer.py --speed 10 --loop 3 --run-id-in-hash     # 부하 테스트
     python src/replay/producer.py --speed 100 --inject-faults 0.01         # 품질 검사 검증 (faults.py)
     python src/replay/producer.py --rate 5000 --duration 240               # 일정 속도 부하 (ADR 0006)
+    python src/replay/producer.py --rate 5000 --duration 900 --shuffle --amplify streaming:5:330:30   # 이상 주입 (ADR 0007 결정 6)
 
 재생 규칙
 - 입력: 필터 전 data/flows/*.parquet 전체 (배경 트래픽 필터는 파이프라인 안에서 한다)
@@ -13,6 +14,15 @@
   offset = last_seen − (그 PCAP의 가장 이른 first_seen), 전송 목표 시각 = 시작 시각 + offset ÷ speed
 - key = flow_id. 기본은 추출 단계에서 만든 값 그대로다 (멱등 시험용)
   --run-id-in-hash면 run_id·loop_idx를 섞어 새 flow_id를 만든다 (부하 테스트용)
+
+이상 주입 (6단계, ADR 0007 결정 6)
+- --shuffle (일정 속도 모드): 회차마다 순서를 섞는다. 타임라인 순서로 반복하면 분류되는 플로우가 회차 앞쪽에 몰려
+  회차마다 자연 급증이 생긴다 (docs/step6-dashboard.md 4절). 섞으면 클래스 구성이 일정한 배경 트래픽이 된다
+- --amplify CLASS:FACTOR:START:DURATION (여러 번 지정 가능): 송신 시작 START초부터 DURATION초 동안 라벨 클래스가
+  CLASS인 행을 보낼 때마다 FACTOR−1개를 더 보낸다 → 그 클래스 트래픽이 FACTOR배가 된다
+  - 증폭분은 새 flow_id(run_flow_id(원본, run_id-amp, 순번))라서 실제 추가 트래픽처럼 센다
+  - 증폭분의 run_id는 <run_id>-amp다 (ClickHouse 스키마를 바꾸지 않고 주입 행을 구분한다)
+  - 구간마다 시작·끝 시각(epoch ms)과 보낸 수를 로그에 남긴다 (amplify ...)
 """
 
 import argparse
@@ -105,6 +115,11 @@ def main() -> None:
                         help="일정 속도 모드: 타임라인을 무시하고 초당 N건을 고르게 보낸다 (부하 테스트, ADR 0006 결정 1)")
     parser.add_argument("--duration", type=float, default=None,
                         help="일정 속도 모드에서 보내는 시간(초). 데이터가 끝나면 처음부터 반복한다")
+    parser.add_argument("--shuffle", action="store_true",
+                        help="일정 속도 모드에서 회차마다 순서를 섞는다 (클래스 구성이 일정한 배경 트래픽)")
+    parser.add_argument("--shuffle-seed", type=int, default=7)
+    parser.add_argument("--amplify", action="append", default=[], metavar="CLASS:FACTOR:START:DURATION",
+                        help="START초부터 DURATION초 동안 라벨 클래스 CLASS를 FACTOR배로 보낸다 (여러 번 지정 가능)")
     args = parser.parse_args()
     if args.speed <= 0:
         parser.error("--speed는 0보다 커야 한다")
@@ -112,6 +127,17 @@ def main() -> None:
         parser.error("--inject-faults는 0과 1 사이여야 한다")
     if args.duration is not None and args.rate is None:
         parser.error("--duration은 --rate와 함께 쓴다")
+    if args.shuffle and args.rate is None:
+        parser.error("--shuffle은 --rate와 함께 쓴다")
+    episodes = []
+    for spec in args.amplify:
+        try:
+            cls, factor, start, dur = spec.split(":")
+            episodes.append({"cls": cls, "factor": int(factor), "start": float(start), "dur": float(dur), "extra": 0})
+        except ValueError:
+            parser.error(f"--amplify 형식은 CLASS:FACTOR:START:DURATION (정수 FACTOR ≥ 2): {spec}")
+        if episodes[-1]["factor"] < 2:
+            parser.error(f"--amplify FACTOR는 2 이상: {spec}")
     if args.rate is not None:
         if args.rate <= 0:
             parser.error("--rate는 0보다 커야 한다")
@@ -184,11 +210,37 @@ def main() -> None:
         injected[fault] += 1
         return 2
 
+    amp_seq = 0
+
+    def amplify(row: dict, loop_idx: int, event_time_ms: int, elapsed: float) -> int:
+        """진행 중인 증폭 구간이 이 행의 클래스면 FACTOR−1개를 더 보낸다. 보낸 수를 돌려준다."""
+        # elapsed는 wall clock 기준이다. 부하 중 WSL에서 monotonic이 wall보다 최대 약 10% 느리게 갔다 (step6-dashboard 4절).
+        # ClickHouse·Kafka·Grafana 시각이 모두 wall clock이므로 주입 구간도 wall clock으로 맞춘다
+        nonlocal amp_seq
+        n = 0
+        for ep in episodes:
+            if ep["cls"] == row["service_class"] and ep["start"] <= elapsed < ep["start"] + ep["dur"]:
+                for _ in range(ep["factor"] - 1):
+                    fid = run_flow_id(row["flow_id"], f"{run_id}-amp", amp_seq)
+                    amp_seq += 1
+                    m = build_message(row, features, fid, f"{run_id}-amp", loop_idx, event_time_ms=event_time_ms)
+                    m["ts"]["replay_sent_ms"] = int(time.time() * 1000)
+                    produce(str(fid), json.dumps(m))
+                    n += 1
+                ep["extra"] += ep["factor"] - 1
+        return n
+
     sent = 0
     normal = 0
     loop_idx = 0
-    print(f"send_start_ms={int(time.time() * 1000)}", flush=True)   # 부하 테스트의 정상 구간 기준 (데이터 로딩 뒤)
+    send_start_ms = int(time.time() * 1000)
+    print(f"send_start_ms={send_start_ms}", flush=True)   # 부하 테스트의 정상 구간 기준 (데이터 로딩 뒤)
     t_start = time.monotonic()
+    for i, ep in enumerate(episodes):   # 계획 시각 (alert_test.sh가 주입 시작 기준으로 쓴다)
+        print(f"amplify_plan {i} class={ep['cls']} factor={ep['factor']} "
+              f"start_ms={send_start_ms + int(ep['start'] * 1000)} end_ms={send_start_ms + int((ep['start'] + ep['dur']) * 1000)}",
+              flush=True)
+    shuffler = random.Random(args.shuffle_seed)
     try:
         if args.rate is not None:
             # 일정 속도 모드: k번째 정상 메시지를 t_start + k / rate에 보낸다. 2 ms 이상 앞설 때만 멈춘다
@@ -197,7 +249,8 @@ def main() -> None:
             stop_at = t_start + args.duration if args.duration is not None else float("inf")
             done = False
             while not done and (args.loop == 0 or loop_idx < args.loop):
-                for row in rows:
+                order = shuffler.sample(rows, len(rows)) if args.shuffle else rows
+                for row in order:
                     now = time.monotonic()
                     if now >= stop_at:
                         done = True
@@ -205,7 +258,10 @@ def main() -> None:
                     ahead = t_start + normal * interval - now
                     if ahead > 0.002:
                         time.sleep(ahead)
-                    sent += send(row, loop_idx, event_time_ms=int(time.time() * 1000))
+                    et = int(time.time() * 1000)
+                    sent += send(row, loop_idx, event_time_ms=et)
+                    if episodes:
+                        sent += amplify(row, loop_idx, et, time.time() - send_start_ms / 1000)
                     normal += 1
                 else:
                     loop_idx += 1
@@ -219,7 +275,10 @@ def main() -> None:
                     wait = base_mono + rel_s - time.monotonic()
                     if wait > 0:
                         time.sleep(wait)
-                    sent += send(row, loop_idx, event_time_ms=base_wall_ms + int(rel_s * 1000))
+                    et = base_wall_ms + int(rel_s * 1000)
+                    sent += send(row, loop_idx, event_time_ms=et)
+                    if episodes:
+                        sent += amplify(row, loop_idx, et, time.time() - send_start_ms / 1000)
                     normal += 1
                 loop_idx += 1
     except KeyboardInterrupt:
@@ -239,6 +298,8 @@ def main() -> None:
         print(f"send loop {send_s:.2f}s (expected per loop {expected:.2f}s = timeline span ÷ speed, loops {loop_idx}) | "
               f"final flush {t_end - t_send_done:.2f}s | {sent / send_s if send_s > 0 else 0:,.0f} msg/s")
     print("per partition:", dict(sorted(delivered.items())))
+    for i, ep in enumerate(episodes):
+        print(f"amplify {i} class={ep['cls']} factor={ep['factor']} extra_sent={ep['extra']:,}")
     if args.inject_faults:
         print(f"injected {sum(injected.values()):,} (normal {sent - sum(injected.values()):,}):",
               json.dumps({t: injected[t] for t in FAULT_TYPES}))
