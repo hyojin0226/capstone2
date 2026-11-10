@@ -153,4 +153,6 @@ docs/              # 설계 결정 기록(ADR), 성능 실험 결과
     오탐 30분 0건, Spark 재시작 직후 3/3. WSL wall clock이 부하 중 monotonic보다 약 9.5% 빠름 → 구간은 wall clock 기준
   - [x] Kafka lag 패널 (step6-dashboard 5절): `lag_reporter.py` → `pipeline_lag`(009), 패널 2개(파티션별 lag, 마지막 배치 후 경과). verify_grafana 22/22.
     Spark 40초 정지 시 lag 21.7만(예상 22.9만), 재시작 후 53초에 정상 복귀(28초는 Spark 기동)
-  - [ ] dbt
+  - [x] dbt (step6-dashboard 6절): dbt-core 1.12.6 + dbt-clickhouse 1.10.3 (`.venv-dbt`), `capstone_dbt`에 stg_flows, traffic_hourly·quality_hourly(insert_overwrite 시간 파티션), model_accuracy_daily.
+    테스트 14개(원천 합계 일치, 키 유일, 정확도 일관성) — 일부러 넣은 중복을 잡는 것 확인. `dbt_reprocess_test.sh`: 증분 재실행·시나리오 ① 재빌드 지문 동일, 시나리오 ② B 분포 반영
+  - [ ] 6단계 마무리 문서 (status-and-plan, 발표용 요약)

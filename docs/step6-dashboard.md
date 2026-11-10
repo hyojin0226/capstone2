@@ -2,7 +2,7 @@
 
 - 설계: docs/adr/0007-dashboard-alerting-dbt.md (채택 2026-11-10)
 - 구현 순서: 뷰·검증 → Grafana 프로비저닝 → 패널 비용 측정 → 증폭 주입·알림·탐지 지연 → lag 패널 → dbt
-- 진행: 뷰 ✓, 프로비저닝 ✓, 패널 비용 ✓, 증폭·알림 ✓ (4절), lag 패널 ✓ (5절), dbt
+- 진행: 뷰 ✓, 프로비저닝 ✓, 패널 비용 ✓, 증폭·알림 ✓ (4절), lag 패널 ✓ (5절), dbt ✓ (6절)
 
 ## 1. 집계 뷰 (2026-11-10)
 
@@ -304,3 +304,84 @@ ADR 0007 결정 4는 "기준을 넘으면 TTL"이었다. 측정해 보니 이 �
   - 파이프라인 정체 알림(예: lag > 정상 최대의 2배가 1분 지속)은 이 테이블 위에 같은 방식으로 만들 수 있다. 이번 범위에서는 패널까지만 둔다.
 - 장애 복구 시간 약 53초 중 28초가 Spark 기동이다. 따라잡기는 30초 이내였다.
   - 그래서 복구 시간을 줄이려면 처리 속도를 높이는 것보다 기동 시간을 줄이는 것이 먼저다(예: 모델 로드, 세션 준비).
+
+## 6. dbt (ADR 0007 결정 8, 2026-11-10)
+
+### 6-1. 설치와 구성
+
+- **dbt**는 SQL `SELECT`로 분석 테이블을 정의하는 도구다. 의존 순서대로 만들고(`ref`), 테스트하고, 문서를 만든다.
+  - 결과 테이블을 만들어 두면 원천이 reset되거나 커져도 시간 단위 이력을 싸게 볼 수 있다.
+- **설치:** 파이프라인 venv와 섞이지 않게 별도 venv `.venv-dbt`를 쓴다.
+  - `pip install dbt-clickhouse==1.10.3`이 dbt-core **1.12.6**, dbt-adapters 1.24.5(`< 1.25` 조건 충족)로 해결됐다.
+  - 전체를 `dbt/requirements.txt`에 고정했다.
+  - 실행하면 "dbt v2가 나왔다"는 안내가 나온다. dbt-clickhouse 1.10.3은 dbt Core v1용이라 v1을 유지한다.
+- **연결** (`dbt/profiles.yml`): ClickHouse HTTP 8123, `capstone` 사용자(로컬 테스트 비밀번호, 환경 변수로 덮어쓴다).
+  - 결과는 별도 데이터베이스 **`capstone_dbt`**에 둔다. 원천(`capstone`)과 섞이지 않는다.
+  - `grafana_ro`는 테이블을 만들 수 없어서 dbt에는 쓰지 않는다.
+- **원천** (`models/sources.yml`): 007 집계 뷰 `flows_dedup`, `quality_by_window`와 006 `holdout_eval_rows`다. 대시보드와 같은 원칙이다(테이블 직접 조회 금지).
+
+| 모델 | 구체화 | 내용 |
+|---|---|---|
+| `stg_flows` | view | `flows_dedup` + `hour` |
+| `traffic_hourly` | incremental, `insert_overwrite`, 파티션 = hour | 시간 × 예측 클래스: flows, bytes, packets, runs |
+| `quality_hourly` | incremental, `insert_overwrite`, 파티션 = hour | 시간 × 품질 지표 (rejected:<사유>, flagged, injected) |
+| `model_accuracy_daily` | table (매번 전체) | 일 × 모델 × 실제 클래스: support, correct, recall |
+
+- **증분 방식 (`insert_overwrite`):**
+  - 새로 계산한 시간 파티션을 **통째로 교체**한다(ClickHouse `REPLACE PARTITION`).
+  - 같은 시간을 다시 만들어도 행이 덧붙지 않는다. 그래서 재처리 뒤 재빌드가 멱등이다.
+  - ADR의 "시간 단위 delete+insert"를 이 전략으로 구현했다. delete+insert는 키가 일치하는 행만 지운다. 그래서 재추론 뒤 어떤 클래스가 그 시간에서 사라지면 옛 행이 남는다.
+- **다시 만들 범위** (`macros/hour_filter.sql`):
+  - 기본은 대상 테이블의 마지막 시간부터다(그 시간에 늦게 온 행을 반영).
+  - 재처리 뒤에는 `--vars '{"start": ..., "end": ...}'`로 범위를 준다(UTC, [start, end)).
+- **`model_accuracy_daily`를 증분으로 하지 않는 이유:** 재추론하면 과거 날짜의 값이 바뀐다. 표가 작아서(일 × 모델 × 5클래스) 매번 전체를 만드는 편이 단순하고 맞다.
+- **한계 (기록):**
+  - 재처리로 어떤 시간의 원천 행이 **모두** 사라지면, 그 시간 파티션은 새 결과에 없어서 교체되지 않는다(옛 값이 남는다).
+  - 같은 시간대의 실험을 reset 후 다시 돌리고 재빌드하면, 그 시간은 새 실행의 값으로 바뀐다. 이력은 "현재 원천에서 다시 만든 값"이다.
+
+### 6-2. 테스트 (14개)
+
+- 기본 테스트:
+  - not_null: hour, traffic_class, flows, metric, day, model_version, service_class
+  - accepted_values: `traffic_hourly.traffic_class`(5클래스 + background + unclassified), `model_accuracy_daily.service_class`(5클래스)
+- 직접 만든 테스트 (`dbt/tests/`):
+  - `assert_traffic_hourly_matches_source`: 원천에 있는 시간마다 클래스별 `traffic_hourly` 합 = `flows_dedup` 행 수
+  - `assert_quality_hourly_matches_source`: 지표별 `quality_hourly` 합 = `quality_by_window` 합
+  - `assert_hourly_keys_unique`: 시간 × 키 한 행. 파티션 교체가 덧붙이기로 바뀌면 걸린다
+  - `assert_accuracy_consistent`: correct ≤ support, support 합 = `holdout_eval_rows` 행 수
+- **테스트가 실제로 잡는지 확인 (일부러 망가뜨리기):**
+  - `traffic_hourly`의 chat 행과 `quality_hourly`의 injected 행을 한 번 더 넣었다. 그러자 키 유일성과 합계 일치 테스트가 실패했다. 그 뒤 기간 재빌드로 18/18로 복구했다.
+  - 처음 쓴 합계 테스트는 dbt 쪽을 행 단위로 join해서, 같은 행이 두 번 들어가도 행마다 값이 같아 통과했다. dbt 쪽도 키별로 합친 뒤 비교하도록 고쳤다.
+  - 값이 0인 지표(`flagged`)는 두 번 들어가도 합이 같다. 이 경우는 유일성 테스트가 잡는다.
+
+### 6-3. 재처리 뒤 재빌드 검증 (`infra/scripts/dbt_reprocess_test.sh`)
+
+| 단계 | 확인 | 결과 |
+|---|---|---|
+| 0. 기준 (정상 364,054 + 오류 주입 1%) | `dbt build` | 18/18, 지문 F0 (traffic 6행, quality 5행, accuracy 5행) |
+| 1. 같은 원천으로 증분 재실행 | 지문 = F0 | **통과** |
+| 2. 시나리오 ① (Kafka·ClickHouse 결과 소실 → S3 보존본 재처리, 14/14) → 기간 재빌드 | 지문 = F0, 파티션 수정 시각이 바뀜 | **통과** (실제로 다시 쓰였고 값이 같다) |
+| 3. 시나리오 ② (모델 A → B 재추론, 14/14) → 기간 재빌드 | 18/18, 시간별 합 불변, 분류 클래스 = B 예측 분포, accuracy에 A·B | **통과** |
+| 4. 스트리밍 잡 복구 | 운영 모델 A | `xgb-20261027-1cc0f57c` |
+
+- **재추론 반영** (`traffic_hourly`, A → B):
+  - chat 1,009 → 985, email 652 → 670, file_transfer 1,030 → 1,034, streaming 2,010 → 2,000, voip 4,057 → 4,069
+  - background 355,296은 그대로다. F2는 모델과 무관하기 때문이다.
+  - B 값은 `flow_predictions` B 분포와 정확히 같다.
+- **`model_accuracy_daily`:**
+  - A 823/1,103 (0.7461), B 825/1,103 (0.748)
+  - 오프라인 held-out 평가, `realtime_holdout_accuracy` 값과 같다.
+- **소요 시간:** dbt 빌드와 테스트 18개를 합쳐 약 1.3–5초다(36만 행). 원천 뷰가 `flows_raw FINAL`을 전체로 읽으므로, 3절처럼 원천 크기에 비례한다.
+- **측정 중 고친 것:** 처음에는 지문 비교가 실패했다. 그런데 값은 같았고 행 순서만 달랐다. ClickHouse에서 `UNION ALL` 뒤의 `ORDER BY`는 마지막 SELECT에만 걸린다. 바깥 쿼리에서 정렬하도록 고쳤다.
+
+### 6-4. 실행
+
+```bash
+cd dbt && DBT_PROFILES_DIR=. ../.venv-dbt/bin/dbt build
+```
+
+재처리 뒤 기간 재빌드 (UTC):
+
+```bash
+cd dbt && DBT_PROFILES_DIR=. ../.venv-dbt/bin/dbt build --vars '{"start": "2026-11-10 13:00:00", "end": "2026-11-10 14:00:00"}'
+```

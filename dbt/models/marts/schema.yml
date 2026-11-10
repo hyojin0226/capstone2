@@ -1,0 +1,35 @@
+version: 2
+models:
+  - name: traffic_hourly
+    description: 시간 × 예측 클래스 트래픽 이력 (원천은 reset 때 비워지지만 이 표는 남는다)
+    columns:
+      - name: hour
+        data_tests: [not_null]
+      - name: traffic_class
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [chat, email, file_transfer, streaming, voip, background, unclassified]
+      - name: flows
+        data_tests: [not_null]
+  - name: quality_hourly
+    description: 시간 × 품질 지표 이력
+    columns:
+      - name: hour
+        data_tests: [not_null]
+      - name: metric
+        data_tests: [not_null]
+  - name: model_accuracy_daily
+    description: 일 × 모델 × 실제 클래스 held-out 정확도
+    columns:
+      - name: day
+        data_tests: [not_null]
+      - name: model_version
+        data_tests: [not_null]
+      - name: service_class
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [chat, email, file_transfer, streaming, voip]

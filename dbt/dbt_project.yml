@@ -1,0 +1,23 @@
+# 6단계 dbt 프로젝트 (ADR 0007 결정 8). 원천은 ClickHouse capstone의 집계 뷰, 결과는 capstone_dbt 데이터베이스.
+#   cd dbt && DBT_PROFILES_DIR=. ../.venv-dbt/bin/dbt build
+name: capstone
+version: "1.0.0"
+profile: capstone
+model-paths: ["models"]
+macro-paths: ["macros"]
+test-paths: ["tests"]
+target-path: target
+clean-targets: ["target", "logs"]
+
+models:
+  capstone:
+    staging:
+      +materialized: view
+    marts:
+      +materialized: table
+
+vars:
+  # 재처리 뒤 특정 기간만 다시 만들 때 (UTC, [start, end)):
+  #   --vars '{"start": "2026-11-10 13:00:00", "end": "2026-11-10 14:00:00"}'
+  start: null
+  end: null

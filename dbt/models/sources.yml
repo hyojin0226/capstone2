@@ -1,0 +1,12 @@
+version: 2
+sources:
+  - name: capstone
+    schema: capstone
+    description: 007 집계 뷰와 006 정확도 뷰. 테이블을 직접 읽지 않는다 (merge 전 중복 방지, ADR 0007 결정 3)
+    tables:
+      - name: flows_dedup
+        description: flows_raw FINAL, 오류 주입 행 제외. traffic_class는 행마다 정확히 하나
+      - name: quality_by_window
+        description: 송신 시각(거부 행은 Kafka 타임스탬프) 10초 윈도우 × metric
+      - name: holdout_eval_rows
+        description: 모델별 held-out 세션 플로우의 예측 (flow_predictions 기준이라 재추론 뒤에도 모델별로 남는다)

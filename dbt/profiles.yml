@@ -1,0 +1,15 @@
+# 로컬 개발용 연결 설정. 비밀번호 기본값은 infra/.env.example의 로컬 테스트 값이다 (환경 변수로 덮어쓴다).
+# dbt는 capstone_dbt에 테이블을 만들어야 하므로 조회 전용 grafana_ro가 아니라 capstone 사용자를 쓴다.
+capstone:
+  target: dev
+  outputs:
+    dev:
+      type: clickhouse
+      host: 127.0.0.1
+      port: 8123
+      user: "{{ env_var('CLICKHOUSE_USER', 'capstone') }}"
+      password: "{{ env_var('CLICKHOUSE_PASSWORD', 'capstone-dev') }}"
+      schema: capstone_dbt
+      threads: 2
+      connect_timeout: 10
+      send_receive_timeout: 600

@@ -433,3 +433,23 @@ lag 검증 (Spark를 90초에 죽이고 40초 뒤 재시작):
 ```bash
 bash infra/scripts/lag_test.sh 5000 300
 ```
+
+## 6단계: dbt (ADR 0007 결정 8)
+
+별도 venv에 설치한다 (한 번):
+
+```bash
+python3 -m venv .venv-dbt && .venv-dbt/bin/pip install -r dbt/requirements.txt
+```
+
+빌드와 테스트 (결과: ClickHouse `capstone_dbt`):
+
+```bash
+cd dbt && DBT_PROFILES_DIR=. ../.venv-dbt/bin/dbt build
+```
+
+재처리 뒤 재빌드 검증 (초기화 → 기준 → 시나리오 ① → 시나리오 ② → 운영 모델 복구):
+
+```bash
+bash infra/scripts/dbt_reprocess_test.sh
+```

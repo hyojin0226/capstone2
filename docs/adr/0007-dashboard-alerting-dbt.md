@@ -150,6 +150,11 @@
   - **원천 합계 일치** (사용자 정의 테스트: 기간별 `traffic_hourly` 합 = `flows_dedup` 행 수)
 - 재처리 뒤 절차: 해당 기간을 `dbt build --vars`로 재빌드한다. 결과가 재처리 전 결과와 같은지 확인한다 (시나리오 ①). 재추론 결과가 반영되는지도 확인한다 (시나리오 ②).
 
+- **결과 (2026-11-10, docs/step6-dashboard.md 6절):**
+  - 버전: dbt-core 1.12.6 + dbt-clickhouse 1.10.3 (`.venv-dbt`, `dbt/requirements.txt`). 결과는 `capstone_dbt`에 둔다.
+  - 증분은 delete+insert 대신 `insert_overwrite`(시간 파티션 교체)로 했다. 재추론 뒤 사라진 클래스의 옛 행이 남지 않게 하려는 것이다.
+  - 테스트 14개를 두었다. 시나리오 ① 뒤 재빌드 지문이 기준과 같고, 시나리오 ② 뒤 B 예측 분포가 반영되었다.
+
 ## 자원
 
 - 추가: Grafana 512 MiB. 컨테이너 한도 합계 13 → 13.5 GB (WSL 16 GB).
