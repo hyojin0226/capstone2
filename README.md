@@ -56,7 +56,7 @@ lag_reporter: Kafka 끝 offset − Spark가 적재까지 끝낸 위치 → Grafa
 
 ## 실행
 
-모든 명령은 WSL2 Ubuntu의 레포 루트에서 실행한다. 단계별 상세 명령과 검증 스크립트는 [infra/README.md](infra/README.md)에 있다.
+모든 명령은 WSL2 Ubuntu의 레포 루트에서 실행한다. 준비물, 기대 결과, 모델 재현성은 **[docs/reproduce.md](docs/reproduce.md)**(새 clone·새 볼륨에서 검증함)에, 서비스별 상세 명령은 [infra/README.md](infra/README.md)에 있다.
 비밀번호는 모두 로컬 개발용 테스트 값이다 (`infra/.env.example`).
 
 **1. Python 환경과 데이터** (PCAP은 ISCX 사이트에서 직접 받아 `data/raw/`에 둔다. `data/`는 git에서 제외된다)
@@ -79,10 +79,14 @@ python src/model/export_model.py
 
 마지막 줄에 `model_version=xgb-<학습일>-<해시>`가 나온다. 버전 이름에 학습일이 들어가므로, 새로 학습했다면 아래 명령 앞에 `export MODEL_VERSION=<그 값>`을 둔다 (compose 기본값은 이 레포의 운영 모델 `xgb-20261027-1cc0f57c`).
 
-**2. 인프라와 스키마** (Spark 이미지는 처음에 빌드된다)
+**2. 인프라와 스키마** (Spark는 토픽이 생긴 뒤 3번에서 띄운다. 이미지는 지금 빌드한다)
 
 ```bash
-docker compose -f infra/docker-compose.yml up -d --build --wait
+docker compose -f infra/docker-compose.yml build spark
+```
+
+```bash
+docker compose -f infra/docker-compose.yml up -d --wait kafka clickhouse seaweedfs grafana
 ```
 
 ```bash
@@ -93,7 +97,7 @@ for f in $(ls infra/clickhouse/schema/*.sql | grep -v backfill); do docker exec 
 python src/model/register_holdout.py --model-dir models/${MODEL_VERSION:-xgb-20261027-1cc0f57c}
 ```
 
-**3. 재생과 대시보드**
+**3. 재생과 대시보드** (`reset_pipeline.sh`가 토픽을 만들고 Spark를 띄운다. 이후 실험마다 이 명령으로 초기화한다)
 
 ```bash
 bash infra/scripts/reset_pipeline.sh
@@ -123,6 +127,7 @@ Grafana: http://localhost:3000 → Dashboards → Capstone → "Capstone 파이�
 | 문서 | 내용 |
 |---|---|
 | [docs/results.md](docs/results.md) | KPI별 결과 요약과 근거 |
+| [docs/reproduce.md](docs/reproduce.md) | 재현 가이드 (준비물, 절차, 기대 결과, 검증 기록) |
 | [docs/status-and-plan.md](docs/status-and-plan.md) | 진행 현황, 위험, 남은 계획 |
 | [docs/adr/](docs/adr/README.md) | 설계 결정 기록 0001–0007 |
 | [docs/step2-pipeline.md](docs/step2-pipeline.md) | 최소 파이프라인, `flow_id`, 장애 테스트 |

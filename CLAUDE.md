@@ -159,4 +159,8 @@ docs/              # 설계 결정 기록(ADR), 성능 실험 결과
     - 주의: verify_grafana는 스트리밍 적재 + lag reporter가 돈 뒤 실행 (재처리 직후엔 배치·lag 패널이 비어 18/22)
 - [ ] 7단계 문서화·발표 준비 — 계획: docs/status-and-plan.md 4절 (README, docs/results.md, ADR 색인, 재현 가이드, 시연)
   - [x] README.md 전면 개정 (결과 표, 아키텍처, 구성 요소, 실행, 문서 지도), docs/results.md (KPI별 결과·근거), docs/adr/README.md (ADR 색인), infra/README 서비스 표 갱신
-  - [ ] 재현 가이드 (빈 볼륨에서 README 실행 절차를 처음부터 검증), 발표 자료, 시연 리허설
+  - [x] 재현 가이드 docs/reproduce.md: 새 clone·새 venv·새 볼륨(COMPOSE_PROJECT_NAME=capstone2repro)에서 전 절차 검증 — archive_test 14/14·4/4, views 6/6, dbt 18/18, grafana 22/22, 알림 ×8 2/2 (31.9초)
+    - 발견: NFStream 추출 순서가 실행마다 달라 모델이 바뀜 → build_dataset이 (source_file, flow_id) 정렬. 정렬 후 모델 `54c2c2a4`가 두 레포에서 같음.
+      운영 모델 A는 정렬 전 데이터로 학습해 처음부터는 재현 안 됨 (`data/dataset/flows_labeled.legacy-order.parquet`로는 재현). held-out 정확도는 행 순서만으로 0.721–0.746
+    - 고침: reset_pipeline.sh·spark_batch.sh가 COMPOSE_PROJECT_NAME을 따름, README 순서(Spark는 reset_pipeline에서 기동)
+  - [ ] 발표 자료, 시연 리허설

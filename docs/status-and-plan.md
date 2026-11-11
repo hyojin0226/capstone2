@@ -14,7 +14,7 @@
 | 4. 보존·재처리 | 완료 | SeaweedFS(S3) 원본 보존, 시나리오 ① Kafka 소실 복구, ② 새 모델 재추론 | step4-reprocessing, ADR 0004·0005 |
 | 5. 성능 | 완료 (11-10) | 부하 테스트 도구, 병목 분석, 튜닝 전후 비교, swap 원인 규명 | step5-load (요약 14절), ADR 0006 |
 | 6. dbt·Grafana·알림 | **완료 (11-10)** | 집계 뷰, Grafana 대시보드 14패널·급증 알림, 탐지 지연 측정, Kafka lag, dbt 이력 | step6-dashboard (요약 7절), ADR 0007 |
-| 7. 문서화·발표 | **진행 중** | README ✓, 결과 요약 ✓, ADR 색인 ✓ / 재현 가이드, 발표 자료, 시연 남음 | 이 문서 4절, docs/results.md |
+| 7. 문서화·발표 | **진행 중** | README ✓, 결과 요약 ✓, ADR 색인 ✓, 재현 가이드 ✓ (새 clone·새 볼륨 검증) / 발표 자료, 시연 남음 | 이 문서 4절, docs/results.md |
 
 ## 2. 지금까지 한 것
 
