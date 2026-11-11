@@ -9,6 +9,7 @@
   4. 값 일치: Grafana가 돌려준 합계 = ClickHouse에 직접 물은 합계 (같은 구간)
      - 플로우 stat = traffic_by_class_10s 합, 분류 시계열 합 = 추론 플로우 수, 전체 시계열 합 = 정상 플로우 수
   5. 조회 사용자: Grafana가 보낸 쿼리는 모두 grafana_ro로 실행되었다 (system.query_log)
+  (1b) 알림 규칙: 프로비저닝 파일의 규칙이 모두 올라와 있고 평가 오류가 없다 (7단계)
 관리자 계정은 로컬 개발용 테스트 값이다 (infra/.env.example GRAFANA_ADMIN_PASSWORD).
 """
 
@@ -98,6 +99,17 @@ def main() -> None:
     check("datasource health", health.get("status") == "OK",
           f"type {ds.get('type')}, user {ds.get('jsonData', {}).get('username')}, health {health.get('status')} {health.get('message', '')}")
     check("plugin version", plugin.get("info", {}).get("version") == "4.22.1", f"{plugin.get('info', {}).get('version')}")
+
+    # 1b. 알림 규칙: 파일(grafana/provisioning/alerting/*.yaml)의 uid가 모두 올라와 있고, 평가 오류가 없다
+    import re
+    want_uids = sorted({m for f in (ROOT / "grafana" / "provisioning" / "alerting").glob("*.yaml")
+                        for m in re.findall(r"^\s+- uid: (\S+)", f.read_text(encoding="utf-8"), re.M)})
+    groups = gf("/api/prometheus/grafana/api/v1/rules").get("data", {}).get("groups", [])
+    live = {r.get("uid") or r.get("labels", {}).get("__alert_rule_uid__"): r for g in groups for r in g.get("rules", [])}
+    provisioned = {r["uid"] for r in gf("/api/v1/provisioning/alert-rules")}
+    bad = [u for u in want_uids if u not in provisioned or live.get(u, {}).get("health") not in ("ok", None)]
+    check("alert rules provisioned and evaluating", not bad and set(want_uids) <= provisioned,
+          f"rules {', '.join(want_uids)}; health " + ", ".join(f"{u}={live.get(u, {}).get('health')}" for u in want_uids))
 
     # 2. 대시보드
     files = sorted((ROOT / "grafana" / "dashboards").glob("*.json"))

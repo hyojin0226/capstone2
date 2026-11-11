@@ -15,7 +15,7 @@
 | 처리량 | 10,000 → 약 14,000–15,500 msg/s (병목 3개를 찾아 고침: 배치 상한, Spark task 수, 컨테이너 swap). 재처리 36만 건 98–116초 → 35초 |
 | E2E 지연 | 5,000 msg/s에서 p50 약 5초, 12,000 msg/s에서 p50 37–57초 → 7–11초 |
 | 신뢰성 | 전송 = Kafka offset = ClickHouse 행 수 (100회 이상 실험 모두). 쓰기 도중 강제 종료해도 중복이 같은 키로 수렴하고 손실 0. Kafka를 지워도 보존본으로 복구(지문 차이 0). 새 모델로 과거 데이터 재추론 |
-| 모니터링 | 대시보드 15패널(값 = 직접 조회), 트래픽 급증 알림: 라벨 ×5 이상 9/10·×8 10/10 탐지, 지연 p50 35초 / p95 48초, 정상 30분 오탐 0 |
+| 모니터링 | 대시보드 15패널(값 = 직접 조회). 알림 3개: 트래픽 급증(라벨 ×5 이상 9/10·×8 10/10, 지연 p50 35초, 정상 30분 오탐 0), 파이프라인 정지(Spark 종료 22초 뒤), 처리 지연 누적(과부하 시 정지와 구분) |
 
 자세한 수치와 근거: **[docs/results.md](docs/results.md)**
 
@@ -111,6 +111,9 @@ python src/replay/producer.py --rate 5000 --duration 300 --shuffle --inject-faul
 ```
 
 Grafana: http://localhost:3000 → Dashboards → Capstone → "Capstone 파이프라인".
+lag 패널과 파이프라인 상태 알림은 `python infra/scripts/lag_reporter.py`를 띄워 둘 때만 값이 있다.
+
+**시연 (약 10분, 한 번에):** `bash infra/scripts/demo.sh` → 재생, 급증 주입·알림, Spark 강제 종료·정지 알림·복구, 합계 검증 ([docs/demo-runbook.md](docs/demo-runbook.md))
 
 급증 주입은 `--amplify CLASS:FACTOR:START:DURATION`이다. 알림 규칙은 직전 5분을 기준선으로 쓰므로 START는 300초 이후로 둔다. 예: `--duration 420 --amplify streaming:8:330:30` (330초부터 30초 동안 streaming 8배, 알림은 약 25–48초 뒤).
 
@@ -145,6 +148,8 @@ bash infra/scripts/run_tests.sh        # lint · unit 36 · spark 10 · sql 6
 | [docs/step4-reprocessing.md](docs/step4-reprocessing.md) | 원본 보존, 재처리 시나리오 ①② |
 | [docs/step5-load.md](docs/step5-load.md) | 부하 테스트, 병목 분석, 튜닝 (요약 14절) |
 | [docs/model-improvements.md](docs/model-improvements.md) | 정확도 보완 실험: 확신도 임계값, 짧은 플로우, 연결 투표 |
+| [docs/pipeline-health-alerts.md](docs/pipeline-health-alerts.md) | 파이프라인 정지·처리 지연 알림, 급증 알림 refire 정리 |
+| [docs/demo-runbook.md](docs/demo-runbook.md) | 발표 시연 순서, 전날 준비, 예상 질문, 현장 대처 (`infra/scripts/demo.sh`) |
 | [docs/confidence-threshold.md](docs/confidence-threshold.md) | 확신도 임계값을 파이프라인에 적용: 검증, held-out 결과, 알림 재측정 |
 | [docs/model-sequence-features.md](docs/model-sequence-features.md) | 패킷 시퀀스 피처 실험 (효과 없음, 원인: 세션 고유 패턴) |
 | [docs/step6-dashboard.md](docs/step6-dashboard.md) | 집계 뷰, Grafana, 알림·탐지 지연, lag, dbt (요약 7절) |

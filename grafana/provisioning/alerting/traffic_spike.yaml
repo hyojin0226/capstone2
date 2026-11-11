@@ -6,6 +6,7 @@
 #   - 최소 건수 20: 작은 수의 흔들림(예: 2 → 7)으로 울리지 않게 한다
 #   - 기준선 윈도우가 24개(4분) 미만이면 평가하지 않는다 (실행 시작 직후 오탐 방지). 이때 값은 0
 #   - pending 0초: 한 번만 넘어도 Alerting. 오탐을 보고 조정한다
+#   - keep_firing_for 30초: 조건이 풀려도 30초 동안 Alerting 유지 → refire 제거. 대신 해제가 30초 늦다 (7단계)
 # 쿼리는 ClickHouse 숫자 열 하나(ratio)와 문자열 열 하나(traffic_class)를 돌려준다 → 클래스가 알림 라벨이 된다.
 # 탐지 시각은 상태 이력(/api/v1/rules/history)의 Alerting 전이 시각으로 잰다 (infra/scripts/alert_test.sh).
 apiVersion: 1
@@ -54,6 +55,7 @@ groups:
         noDataState: OK
         execErrState: Error
         for: 0s
+        keepFiringFor: 30s   # 30초 주입 중 한 번 Normal로 떨어졌다 다시 울리는 refire를 한 사건으로 묶는다 (step6-dashboard 4-4 ③)
         isPaused: false
         labels:
           kind: traffic_spike

@@ -174,4 +174,7 @@ docs/              # 설계 결정 기록(ADR), 성능 실험 결과
     held-out 답한 것의 정확도 0.746 → 0.839 (플로우 75%, 바이트 94%). verify_step3 15/15, views 7/7, grafana 23/23, dbt 18/18, 알림 ×8 2/2 (32.7초)
   - [x] 자동 테스트 + GitHub Actions CI (tests/README.md, `infra/scripts/run_tests.sh`): lint, unit 36, spark 10, sql 6.
     테스트가 찾은 버그: x-fault 아닌 헤더만 있는 메시지가 Spark 배치 전체를 실패시킴(ANSI `[0]`) → `get(…, 0)`으로 수정, 실스택 확인
-  - [ ] 발표 자료, 시연 리허설
+  - [x] 파이프라인 상태 알림 (docs/pipeline-health-alerts.md): 정지(lag>0 & 배치 없음 30초) 22.2초 탐지, 처리 지연 누적(밀린 초>30, 1분) 과부하에서만,
+    정상 10분 오탐 0. 급증 알림 keepFiringFor 30s → refire 0. verify_grafana 24/24
+  - [x] 시연 스크립트 infra/scripts/demo.sh + docs/demo-runbook.md, 리허설 1회 통과 (7/7, 알림 2개 울림)
+  - [ ] 발표 자료, 녹화 백업

@@ -1,0 +1,94 @@
+# 파이프라인 상태 알림 (7단계, docs/pipeline-health-alerts.md). 둘 다 capstone.pipeline_lag(lag_reporter.py, 5초 주기)를 본다.
+#
+# 1. 파이프라인 정지: 처리 안 된 메시지가 있는데(lag > 0) 마지막 스트리밍 배치 뒤 30초가 넘었다
+#    → Spark가 죽었거나 배치 하나에서 멈췄다. 정상: 트리거 5초 + 배치 시간이라 경과는 15초 안쪽이다
+#    유입이 없으면(lag = 0) 경과가 늘어나는 것이 정상이므로 울리지 않는다
+# 2. 처리 지연 누적: 밀린 양을 "몇 초 분량인가"(lag ÷ 최근 60초 유입 속도)로 바꿔, 30초 분량을 넘은 상태가 1분 지속
+#    → Spark는 돌지만 유입을 못 따라간다. 메시지 수가 아니라 초로 보므로 부하와 무관하게 같은 임계값을 쓴다
+#    정상 5,000/s에서 4.4–9.4초 분량이다 (docs/step6-dashboard.md 5-3)
+# 한계: lag_reporter가 꺼져 있으면 데이터가 없어 둘 다 평가하지 않는다(noDataState OK). 감시 대상과 감시 도구가 같은 머신이다
+apiVersion: 1
+groups:
+  - orgId: 1
+    name: pipeline-health
+    folder: Capstone
+    interval: 10s
+    rules:
+      - uid: pipeline-stall
+        title: 파이프라인 정지 (처리할 메시지가 있는데 배치 없음 30초)
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 120, to: 0}
+            datasourceUid: clickhouse
+            model:
+              refId: A
+              editorType: sql
+              format: 1
+              queryType: table
+              rawSql: |-
+                WITH (SELECT max(ts) FROM capstone.pipeline_lag WHERE ts >= now64(3) - INTERVAL 30 SECOND) AS t1
+                SELECT if(sum(lag) > 0 AND min(last_batch_age_s) >= 0, min(last_batch_age_s), 0) AS stalled_s
+                FROM capstone.pipeline_lag
+                WHERE ts = t1
+          - refId: C
+            datasourceUid: __expr__
+            relativeTimeRange: {from: 120, to: 0}
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: {type: gt, params: [30]}
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        isPaused: false
+        labels:
+          kind: pipeline_health
+        annotations:
+          summary: "Spark 배치가 {{ humanize $values.A.Value }}초째 없다 (처리할 메시지는 있음)"
+          description: Spark 컨테이너·로그를 확인한다. 재시작하면 체크포인트에서 이어서 처리한다 (ADR 0002, 중복은 같은 키로 수렴)
+
+      - uid: pipeline-behind
+        title: 처리 지연 누적 (밀린 양 30초 분량 초과 1분)
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 120, to: 0}
+            datasourceUid: clickhouse
+            model:
+              refId: A
+              editorType: sql
+              format: 1
+              queryType: table
+              rawSql: |-
+                WITH (SELECT max(ts) FROM capstone.pipeline_lag WHERE ts >= now64(3) - INTERVAL 30 SECOND) AS t1,
+                     (SELECT min(ts) FROM capstone.pipeline_lag WHERE ts >= now64(3) - INTERVAL 60 SECOND) AS t0
+                SELECT if(lag_now = 0, 0, lag_now / greatest(rate, 1)) AS behind_s
+                FROM
+                (
+                    SELECT sumIf(lag, ts = t1) AS lag_now,
+                           (sumIf(end_offset, ts = t1) - sumIf(end_offset, ts = t0))
+                               / greatest(dateDiff('millisecond', t0, t1) / 1000, 1) AS rate
+                    FROM capstone.pipeline_lag
+                    WHERE ts IN (t0, t1)
+                )
+          - refId: C
+            datasourceUid: __expr__
+            relativeTimeRange: {from: 120, to: 0}
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: {type: gt, params: [30]}
+        noDataState: OK
+        execErrState: Error
+        for: 1m
+        isPaused: false
+        labels:
+          kind: pipeline_health
+        annotations:
+          summary: "처리되지 않은 메시지가 유입 {{ humanize $values.A.Value }}초 분량 (1분 넘게 30초 초과)"
+          description: 유입 속도가 처리 능력(약 14,000–15,500 msg/s, docs/step5-load.md)을 넘었거나 Spark가 느려졌다. 배치 시간 패널을 본다
