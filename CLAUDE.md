@@ -166,4 +166,7 @@ docs/              # 설계 결정 기록(ADR), 성능 실험 결과
   - [x] 정확도 보완 실험 (docs/model-improvements.md, `src/model/eval_improvements.py`): held-out 시드 10개 평균 0.723 (A의 0.746은 높게 나온 경우), 바이트 정확도 0.995.
     확신도 ≥ 0.9 → 플로우 62%·바이트 94%에 답하고 정확도 0.861. 짧은 플로우 제외·연결 투표는 +0.01–0.02 (투표는 바이트 정확도를 낮춤).
     다음 후보(승인 필요): Spark에 확신도 임계값(unknown) 적용, NFStream splt(앞쪽 N개 패킷) 피처 오프라인 실험
+  - [x] 패킷 시퀀스 피처 실험 (docs/model-sequence-features.md, `extract_flows.py --splt 20` → data/flows_splt, `src/model/eval_sequence.py`):
+    base+seq20 held-out 0.717 / macro-F1 0.587 (base 0.723 / 0.634) → 효과 없음. 무작위 분할에선 +0.014 → 세션 고유 패턴을 외움. 운영 피처는 base 유지.
+    정확도 상한은 세션 다양성. 다음 후보: VPN-PCAPs 추가, 규제 강화 (승인 필요)
   - [ ] 발표 자료, 시연 리허설

@@ -20,10 +20,11 @@ sys.path.insert(0, str(Path(__file__).parent))
 from flow_id import compute_flow_ids  # noqa: E402
 
 
-def extract(pcap_path: Path, out_dir: Path) -> Path:
+def extract(pcap_path: Path, out_dir: Path, splt: int = 0) -> Path:
     streamer = NFStreamer(
         source=str(pcap_path),
         statistical_analysis=True,  # 패킷 크기·도착 간격 통계(min/mean/stddev/max) 피처 생성
+        splt_analysis=splt,         # 앞쪽 N개 패킷의 방향·크기·도착 간격 (0 = 끔, docs/model-sequence-features.md)
         idle_timeout=120,           # 120초 동안 패킷이 없으면 플로우 종료 (NFStream 기본값)
         active_timeout=1800,        # 1800초 넘게 이어지면 강제로 끊어서 새 플로우 (기본값)
     )
@@ -41,6 +42,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("pcaps", type=Path, nargs="+")
     parser.add_argument("--out-dir", type=Path, default=Path("data/flows"))
+    parser.add_argument("--splt", type=int, default=0,
+                        help="앞쪽 N개 패킷 시퀀스(splt_direction/ps/piat_ms) 추출. 기본 0 = 지금 파이프라인 데이터와 같음")
     args = parser.parse_args()
 
     import pandas as pd
@@ -48,7 +51,7 @@ def main() -> None:
     total_start = time.perf_counter()
     for pcap in sorted(args.pcaps):
         start = time.perf_counter()
-        out_path = extract(pcap, args.out_dir)
+        out_path = extract(pcap, args.out_dir, args.splt)
         elapsed = time.perf_counter() - start
         n_flows = len(pd.read_parquet(out_path, columns=["id"]))
         print(f"{pcap.name:<28} {pcap.stat().st_size / 1e6:8.1f} MB → {n_flows:>8,} flows  {elapsed:6.1f}s")

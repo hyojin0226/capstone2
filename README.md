@@ -136,6 +136,7 @@ Grafana: http://localhost:3000 → Dashboards → Capstone → "Capstone 파이�
 | [docs/step4-reprocessing.md](docs/step4-reprocessing.md) | 원본 보존, 재처리 시나리오 ①② |
 | [docs/step5-load.md](docs/step5-load.md) | 부하 테스트, 병목 분석, 튜닝 (요약 14절) |
 | [docs/model-improvements.md](docs/model-improvements.md) | 정확도 보완 실험: 확신도 임계값, 짧은 플로우, 연결 투표 |
+| [docs/model-sequence-features.md](docs/model-sequence-features.md) | 패킷 시퀀스 피처 실험 (효과 없음, 원인: 세션 고유 패턴) |
 | [docs/step6-dashboard.md](docs/step6-dashboard.md) | 집계 뷰, Grafana, 알림·탐지 지연, lag, dbt (요약 7절) |
 | [infra/README.md](infra/README.md) | 서비스별 실행·검증 명령 |
 
