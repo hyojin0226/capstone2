@@ -75,7 +75,7 @@ def main() -> None:
     injected = json.loads(m.group(2)) if m else {}
 
     raw = ch("SELECT flow_id, fault_type, quality_ok, quality_flags, f2_passed, inferred, pred_service_class, "
-             "pred_confidence, model_version FROM capstone.flows_raw FINAL")
+             "pred_confidence, pred_accepted, confidence_threshold, model_version FROM capstone.flows_raw FINAL")
     rej = ch("SELECT kafka_partition, kafka_offset, fault_type, reason FROM capstone.flows_rejected FINAL")
     offsets = subprocess.run(["docker", "exec", "kafka", "/opt/kafka/bin/kafka-get-offsets.sh",
                               "--bootstrap-server", "kafka:9092", "--topic", "flows.raw"],
@@ -140,6 +140,16 @@ def main() -> None:
           f"inferred {len(both):,} vs offline {len(off):,}, only one side {int((inf._merge != 'both').sum())}, "
           f"class mismatches {int((both.pred_service_class != both.pred).sum())}, "
           f"max |conf diff| {float(np.abs(both.pred_confidence.astype('float32').to_numpy() - both.conf.to_numpy()).max())}")
+
+    # 5b. 확신도 임계값 (docs/confidence-threshold.md): 추론 행은 모두 같은 임계값, 수락 = 확신도 >= 임계값, 비추론 행은 수락 안 함
+    inf_rows = raw[raw.inferred]
+    thresholds = sorted(set(inf_rows.confidence_threshold.astype("float32").round(6)))
+    expect_acc = inf_rows.pred_confidence.astype("float32").to_numpy() >= inf_rows.confidence_threshold.astype("float32").to_numpy()
+    bad_acc = int((inf_rows.pred_accepted.to_numpy() != expect_acc).sum())
+    check("accepted = confidence >= threshold (inferred rows), never for non-inferred",
+          len(thresholds) == 1 and bad_acc == 0 and not raw[~raw.inferred].pred_accepted.any(),
+          f"thresholds {thresholds}, mismatched {bad_acc}, accepted {int(inf_rows.pred_accepted.sum()):,}/{len(inf_rows):,} "
+          f"({inf_rows.pred_accepted.mean():.1%})")
 
     # 6. 배치 지표. 스트리밍 배치(batch_id < 1,000,000)와 재처리 배치(≥ 1,000,000)는 같은 데이터를 각각 한 번씩 처리한 기록이다.
     #    둘 다 있으면(예: 스트리밍 적재 뒤 시나리오 ② 재추론) 합치면 두 배가 된다 → 그룹마다 따로 테이블과 맞춘다 (docs/step6-dashboard.md)

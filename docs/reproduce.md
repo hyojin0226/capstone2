@@ -99,10 +99,10 @@ bash infra/scripts/reset_pipeline.sh
 
 | 확인 | 명령 | 기대 결과 (새 볼륨 실측) |
 |---|---|---|
-| 적재·품질·추론·보존 | `bash infra/scripts/archive_test.sh 100` (약 3.5분, 전체 재생 + 오류 주입 1%) | `verify_step3` 14/14, `verify_archive` 4/4, 실시간 held-out = 오프라인 |
+| 적재·품질·추론·보존 | `bash infra/scripts/archive_test.sh 100` (약 3.5분, 전체 재생 + 오류 주입 1%) | `verify_step3` 15/15 (7단계 임계값 검사 추가 전 기록은 14/14), `verify_archive` 4/4, 실시간 held-out = 오프라인 |
 | 집계 뷰 합계 | `python infra/scripts/verify_views.py sums` | 6/6, 정상 364,054 |
 | dbt | 아래 5절 | 18/18 |
-| 대시보드 | lag reporter를 띄우고 짧게 재생한 뒤 `python infra/scripts/verify_grafana.py` | 22/22 |
+| 대시보드 | lag reporter를 띄우고 짧게 재생한 뒤 `python infra/scripts/verify_grafana.py` | 23/23 (임계값 적용 전 22/22) |
 | 급증 알림 | `bash infra/scripts/alert_test.sh 2000 8 2` (약 13분) | 2/2 탐지, 지연 약 32초, 오탐 0 |
 
 대시보드 확인 절차 (`verify_grafana.py`는 스트리밍 배치와 lag 기록이 있어야 모든 패널이 값을 가진다):

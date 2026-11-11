@@ -13,7 +13,7 @@
 | 처리량 | 10,000 → 약 14,000–15,500 msg/s (병목 3개를 찾아 고침: 배치 상한, Spark task 수, 컨테이너 swap). 재처리 36만 건 98–116초 → 35초 |
 | E2E 지연 | 5,000 msg/s에서 p50 약 5초, 12,000 msg/s에서 p50 37–57초 → 7–11초 |
 | 신뢰성 | 전송 = Kafka offset = ClickHouse 행 수 (100회 이상 실험 모두). 쓰기 도중 강제 종료해도 중복이 같은 키로 수렴하고 손실 0. Kafka를 지워도 보존본으로 복구(지문 차이 0). 새 모델로 과거 데이터 재추론 |
-| 모니터링 | 대시보드 14패널(값 = 직접 조회), 트래픽 급증 알림: 라벨 ×5 이상 9/10·×8 10/10 탐지, 지연 p50 35초 / p95 48초, 정상 30분 오탐 0 |
+| 모니터링 | 대시보드 15패널(값 = 직접 조회), 트래픽 급증 알림: 라벨 ×5 이상 9/10·×8 10/10 탐지, 지연 p50 35초 / p95 48초, 정상 30분 오탐 0 |
 
 자세한 수치와 근거: **[docs/results.md](docs/results.md)**
 
@@ -39,6 +39,7 @@ lag_reporter: Kafka 끝 offset − Spark가 적재까지 끝낸 위치 → Grafa
 - **조회 시점 집계:** 시간 윈도우 집계를 Spark 상태가 아니라 ClickHouse 뷰에서 한다. 중복·재처리 뒤에도 집계가 맞다.
 - **원본 보존:** Kafka 보존 기간과 무관하게 원문을 S3에 남기고, 같은 처리 코드로 다시 처리한다.
 - **누수 방지:** IP·포트·타임스탬프는 피처에서 빼고, 학습/평가는 PCAP 세션 단위로 나눈다. 실시간 정확도는 held-out 세션에서만 잰다.
+- **모를 때는 `unknown`:** Spark가 확신도 0.8 미만의 예측을 수락하지 않는다(`CONFIDENCE_THRESHOLD`). held-out에서 답한 것의 정확도 0.746 → 0.839, 답한 플로우 75%·바이트 94% ([ADR 0008](docs/adr/0008-confidence-threshold.md)).
 
 ## 구성 요소
 
@@ -129,13 +130,14 @@ Grafana: http://localhost:3000 → Dashboards → Capstone → "Capstone 파이�
 | [docs/results.md](docs/results.md) | KPI별 결과 요약과 근거 |
 | [docs/reproduce.md](docs/reproduce.md) | 재현 가이드 (준비물, 절차, 기대 결과, 검증 기록) |
 | [docs/status-and-plan.md](docs/status-and-plan.md) | 진행 현황, 위험, 남은 계획 |
-| [docs/adr/](docs/adr/README.md) | 설계 결정 기록 0001–0007 |
+| [docs/adr/](docs/adr/README.md) | 설계 결정 기록 0001–0008 |
 | [docs/step2-pipeline.md](docs/step2-pipeline.md) | 최소 파이프라인, `flow_id`, 장애 테스트 |
 | [docs/step3-first-extraction.md](docs/step3-first-extraction.md), [step4-labeling.md](docs/step4-labeling.md), [step5-baseline.md](docs/step5-baseline.md) | 추출, 라벨 규칙, baseline 모델 |
 | [docs/step3-streaming.md](docs/step3-streaming.md) | Spark 추론, 품질 검사, held-out 정확도 |
 | [docs/step4-reprocessing.md](docs/step4-reprocessing.md) | 원본 보존, 재처리 시나리오 ①② |
 | [docs/step5-load.md](docs/step5-load.md) | 부하 테스트, 병목 분석, 튜닝 (요약 14절) |
 | [docs/model-improvements.md](docs/model-improvements.md) | 정확도 보완 실험: 확신도 임계값, 짧은 플로우, 연결 투표 |
+| [docs/confidence-threshold.md](docs/confidence-threshold.md) | 확신도 임계값을 파이프라인에 적용: 검증, held-out 결과, 알림 재측정 |
 | [docs/model-sequence-features.md](docs/model-sequence-features.md) | 패킷 시퀀스 피처 실험 (효과 없음, 원인: 세션 고유 패턴) |
 | [docs/step6-dashboard.md](docs/step6-dashboard.md) | 집계 뷰, Grafana, 알림·탐지 지연, lag, dbt (요약 7절) |
 | [infra/README.md](infra/README.md) | 서비스별 실행·검증 명령 |

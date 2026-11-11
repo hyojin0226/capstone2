@@ -169,4 +169,7 @@ docs/              # 설계 결정 기록(ADR), 성능 실험 결과
   - [x] 패킷 시퀀스 피처 실험 (docs/model-sequence-features.md, `extract_flows.py --splt 20` → data/flows_splt, `src/model/eval_sequence.py`):
     base+seq20 held-out 0.717 / macro-F1 0.587 (base 0.723 / 0.634) → 효과 없음. 무작위 분할에선 +0.014 → 세션 고유 패턴을 외움. 운영 피처는 base 유지.
     정확도 상한은 세션 다양성. 다음 후보: VPN-PCAPs 추가, 규제 강화 (승인 필요)
+  - [x] 확신도 임계값 파이프라인 적용 (ADR 0008, docs/confidence-threshold.md): Spark `CONFIDENCE_THRESHOLD`(기본 0.8) → `pred_accepted`·`confidence_threshold`,
+    뷰 traffic_class `unknown`, 뷰 `realtime_holdout_selective`, 패널 15개, 알림은 확신 예측만.
+    held-out 답한 것의 정확도 0.746 → 0.839 (플로우 75%, 바이트 94%). verify_step3 15/15, views 7/7, grafana 23/23, dbt 18/18, 알림 ×8 2/2 (32.7초)
   - [ ] 발표 자료, 시연 리허설

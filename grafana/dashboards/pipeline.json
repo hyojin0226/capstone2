@@ -75,8 +75,8 @@
     {
       "id": 2,
       "type": "stat",
-      "title": "분류된 플로우 (추론)",
-      "description": "F2 필터를 통과하고 품질 검사도 통과해 모델이 추론한 플로우",
+      "title": "분류된 플로우 (확신 예측)",
+      "description": "모델이 추론했고 확신도가 임계값(기본 0.8) 이상인 플로우. 미달은 unknown (docs/confidence-threshold.md)",
       "datasource": {
         "type": "grafana-clickhouse-datasource",
         "uid": "clickhouse"
@@ -97,7 +97,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "SELECT sum(flows) FROM capstone.traffic_by_class_10s WHERE $__timeFilter(window_start) AND traffic_class NOT IN ('background', 'unclassified')",
+          "rawSql": "SELECT sum(flows) FROM capstone.traffic_by_class_10s WHERE $__timeFilter(window_start) AND traffic_class NOT IN ('unknown', 'background', 'unclassified')",
           "pluginVersion": "4.22.1"
         }
       ],
@@ -223,7 +223,7 @@
       "id": 5,
       "type": "timeseries",
       "title": "분류된 트래픽: 클래스별 플로우 / 10초",
-      "description": "예측 클래스 기준 (실제 운영에는 라벨이 없다). 급증 알림이 보는 값",
+      "description": "확신도가 임계값 이상인 예측 클래스 기준 (실제 운영에는 라벨이 없다). 급증 알림이 보는 값",
       "datasource": {
         "type": "grafana-clickhouse-datasource",
         "uid": "clickhouse"
@@ -244,7 +244,7 @@
           "editorType": "sql",
           "format": 0,
           "queryType": "timeseries",
-          "rawSql": "SELECT window_start AS time, traffic_class, flows\nFROM capstone.traffic_by_class_10s\nWHERE $__timeFilter(window_start) AND traffic_class NOT IN ('background', 'unclassified')\nORDER BY time",
+          "rawSql": "SELECT window_start AS time, traffic_class, flows\nFROM capstone.traffic_by_class_10s\nWHERE $__timeFilter(window_start) AND traffic_class NOT IN ('unknown', 'background', 'unclassified')\nORDER BY time",
           "pluginVersion": "4.22.1"
         }
       ],
@@ -284,8 +284,8 @@
     {
       "id": 6,
       "type": "timeseries",
-      "title": "전체 트래픽: 분류 / 배경 / 미분류 플로우 / 10초",
-      "description": "background = F2 필터에서 걸러진 배경 트래픽, unclassified = F2는 통과했지만 soft 품질 검사 실패",
+      "title": "전체 트래픽: 분류 / unknown / 배경 / 미분류 플로우 / 10초",
+      "description": "unknown = 추론했지만 확신도 미달, background = F2 필터에서 걸러진 배경 트래픽, unclassified = F2는 통과했지만 soft 품질 검사 실패",
       "datasource": {
         "type": "grafana-clickhouse-datasource",
         "uid": "clickhouse"
@@ -306,7 +306,7 @@
           "editorType": "sql",
           "format": 0,
           "queryType": "timeseries",
-          "rawSql": "SELECT window_start AS time,\n       if(traffic_class IN ('background', 'unclassified'), traffic_class, 'classified') AS kind,\n       sum(flows) AS flows\nFROM capstone.traffic_by_class_10s\nWHERE $__timeFilter(window_start)\nGROUP BY time, kind\nORDER BY time",
+          "rawSql": "SELECT window_start AS time,\n       if(traffic_class IN ('unknown', 'background', 'unclassified'), traffic_class, 'classified') AS kind,\n       sum(flows) AS flows\nFROM capstone.traffic_by_class_10s\nWHERE $__timeFilter(window_start)\nGROUP BY time, kind\nORDER BY time",
           "pluginVersion": "4.22.1"
         }
       ],
@@ -654,7 +654,7 @@
       "id": 12,
       "type": "table",
       "title": "실시간 held-out 정확도 (모델별)",
-      "description": "학습에서 뺀 세션의 플로우에 대한 스트리밍 추론 결과 (ADR 0003 결정 6). 시간 범위와 무관",
+      "description": "학습에서 뺀 세션의 플로우에 대한 스트리밍 추론 결과 (ADR 0003 결정 6). 임계값과 무관하게 모든 예측을 채점. 시간 범위와 무관",
       "datasource": {
         "type": "grafana-clickhouse-datasource",
         "uid": "clickhouse"
@@ -811,6 +811,44 @@
           "sort": "desc"
         }
       }
+    },
+    {
+      "id": 15,
+      "type": "table",
+      "title": "held-out: 답한 비율 / 답한 것의 정확도 (확신도 임계값)",
+      "description": "확신도가 임계값 미만이면 unknown으로 답하지 않는다. coverage = 답한 플로우 비율, byte_coverage = 답한 바이트 비율, answered_accuracy = 답한 것의 정확도, accuracy_all = 전부 답했을 때. 시간 범위와 무관",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 45,
+        "w": 24,
+        "h": 5
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT model_version, confidence_threshold AS threshold, flows, answered,\n       round(coverage, 3) AS coverage, round(byte_coverage, 3) AS byte_coverage,\n       round(answered_accuracy, 3) AS answered_accuracy, round(accuracy_all, 3) AS accuracy_all\nFROM capstone.realtime_holdout_selective\nORDER BY model_version, threshold",
+          "pluginVersion": "4.22.1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {}
     }
   ]
 }

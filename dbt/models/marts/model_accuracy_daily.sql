@@ -7,6 +7,8 @@ SELECT
     true_class                         AS service_class,
     count()                            AS support,
     countIf(pred_class = true_class)   AS correct,
-    correct / support                  AS recall
+    correct / support                  AS recall,
+    countIf(accepted)                  AS answered,          -- 확신도 >= 임계값 (docs/confidence-threshold.md)
+    countIf(accepted AND pred_class = true_class) AS answered_correct
 FROM {{ source('capstone', 'holdout_eval_rows') }}
 GROUP BY day, model_version, service_class

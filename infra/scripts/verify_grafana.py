@@ -125,11 +125,11 @@ def main() -> None:
 
     # 4. 값 일치 (ClickHouse 직접 조회, 같은 구간)
     w = f"window_start >= fromUnixTimestamp64Milli({t0}) AND window_start <= fromUnixTimestamp64Milli({t1})"
-    direct = ch(f"SELECT sum(flows) AS total, sumIf(flows, traffic_class NOT IN ('background', 'unclassified')) AS cls "
+    direct = ch(f"SELECT sum(flows) AS total, sumIf(flows, traffic_class NOT IN ('unknown', 'background', 'unclassified')) AS cls "
                 f"FROM capstone.traffic_by_class_10s WHERE {w}").iloc[0]
-    for title, expect in (("플로우 (정상, 중복 제거)", direct.total), ("분류된 플로우 (추론)", direct.cls),
+    for title, expect in (("플로우 (정상, 중복 제거)", direct.total), ("분류된 플로우 (확신 예측)", direct.cls),
                           ("분류된 트래픽: 클래스별 플로우 / 10초", direct.cls),
-                          ("전체 트래픽: 분류 / 배경 / 미분류 플로우 / 10초", direct.total)):
+                          ("전체 트래픽: 분류 / unknown / 배경 / 미분류 플로우 / 10초", direct.total)):
         check(f"value '{title}' = ClickHouse", int(sums.get(title, -1)) == int(expect),
               f"grafana {int(sums.get(title, -1)):,} vs clickhouse {int(expect):,}")
 

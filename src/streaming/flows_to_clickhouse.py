@@ -30,7 +30,7 @@ from pyspark.sql.types import (BooleanType, DoubleType, FloatType, IntegerType, 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from archive import s3a_conf, start_archive_query  # noqa: E402
 from f2_filter import is_background  # noqa: E402
-from inference import MODEL_DIR, add_predictions, load_metadata  # noqa: E402
+from inference import CONFIDENCE_THRESHOLD, MODEL_DIR, add_predictions, load_metadata  # noqa: E402
 from quality import add_quality_flags, reject_reason  # noqa: E402
 
 KAFKA_BOOTSTRAP = os.environ.get("KAFKA_BOOTSTRAP", "kafka:9092")
@@ -93,7 +93,8 @@ MESSAGE_COLUMNS = (TOP_FIELDS + [n for n, _ in META_FIELDS] + [n for n, _ in FEA
                    + [f"label_{n}" for n, _ in LABEL_FIELDS] + [n for n, _ in TS_FIELDS])
 KAFKA_COLUMNS = ["kafka_partition", "kafka_offset", "kafka_timestamp_ms"]
 FLOWS_RAW_COLUMNS = (MESSAGE_COLUMNS + ["f2_passed", "quality_ok", "quality_flags", "fault_type"] + KAFKA_COLUMNS
-                     + ["inferred", "pred_service_class", "pred_confidence", "model_version", "spark_processed_ms"])
+                     + ["inferred", "pred_service_class", "pred_confidence", "pred_accepted", "confidence_threshold",
+                        "model_version", "spark_processed_ms"])
 REJECTED_COLUMNS = KAFKA_COLUMNS + ["reason", "fault_type", "run_id", "raw_value", "spark_processed_ms"]
 
 
@@ -192,7 +193,7 @@ def make_write_batch(model_version: str):
 def main() -> None:
     meta = load_metadata()  # 모델이 없거나 메타데이터가 깨졌으면 스트림을 시작하기 전에 실패한다
     print(f"model: {meta['model_version']} (xgboost {meta['xgboost_version']}, {len(meta['features'])} features) "
-          f"from {MODEL_DIR}", flush=True)
+          f"from {MODEL_DIR}, confidence threshold {CONFIDENCE_THRESHOLD}", flush=True)
 
     spark = s3a_conf(SparkSession.builder.appName("flows_to_clickhouse")
                      .config("spark.sql.shuffle.partitions", "3")).getOrCreate()

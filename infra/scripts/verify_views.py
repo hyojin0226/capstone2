@@ -122,8 +122,8 @@ def reinference(model: str) -> None:
           ", ".join(f"{r.model_version} {r.n:,}" for r in mv.itertuples()))
     view = ch("SELECT traffic_class AS k, sum(flows) AS n FROM capstone.traffic_by_class_10s "
               "WHERE traffic_class NOT IN ('background', 'unclassified') GROUP BY k").set_index("k").n
-    hist = ch(f"""SELECT p.pred_service_class AS k, count() AS n
-                  FROM (SELECT flow_id, pred_service_class FROM capstone.flow_predictions FINAL WHERE model_version = '{model}') AS p
+    hist = ch(f"""SELECT if(p.pred_accepted, toString(p.pred_service_class), 'unknown') AS k, count() AS n
+                  FROM (SELECT flow_id, pred_service_class, pred_accepted FROM capstone.flow_predictions FINAL WHERE model_version = '{model}') AS p
                   INNER JOIN (SELECT flow_id FROM capstone.flows_dedup WHERE inferred) AS d ON p.flow_id = d.flow_id
                   GROUP BY k""").set_index("k").n
     check(f"view class totals = {model} prediction history", view.sort_index().astype(int).equals(hist.sort_index().astype(int)),

@@ -5,7 +5,8 @@
 
 -- 1. 중복이 정리된 정상 플로우
 --    traffic_class: 모든 행이 정확히 하나의 클래스에 들어간다 (합계 일치 검증의 전제)
---      추론함 → 예측 클래스 / F2 배경 → 'background' / F2 통과지만 soft 품질 실패 → 'unclassified'
+--      추론함 + 확신도 >= 임계값 → 예측 클래스 / 추론했지만 확신도 미달 → 'unknown' (docs/confidence-threshold.md)
+--      F2 배경 → 'background' / F2 통과지만 soft 품질 실패 → 'unclassified'
 CREATE OR REPLACE VIEW capstone.flows_dedup AS
 SELECT
     flow_id,
@@ -22,9 +23,12 @@ SELECT
     inferred,
     pred_service_class,
     pred_confidence,
+    pred_accepted,
+    confidence_threshold,
     model_version,
     label_service_class,
-    multiIf(inferred, toString(pred_service_class), NOT f2_passed, 'background', 'unclassified') AS traffic_class
+    multiIf(inferred AND pred_accepted, toString(pred_service_class), inferred, 'unknown',
+            NOT f2_passed, 'background', 'unclassified') AS traffic_class
 FROM capstone.flows_raw FINAL
 WHERE fault_type = '';
 

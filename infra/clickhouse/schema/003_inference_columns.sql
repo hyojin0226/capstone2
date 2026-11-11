@@ -6,3 +6,8 @@ ALTER TABLE capstone.flows_raw
     ADD COLUMN IF NOT EXISTS pred_service_class LowCardinality(String) AFTER inferred,
     ADD COLUMN IF NOT EXISTS pred_confidence    Float32                AFTER pred_service_class,
     ADD COLUMN IF NOT EXISTS model_version      LowCardinality(String) AFTER pred_confidence;
+
+-- 확신도 임계값 (7단계, docs/confidence-threshold.md). 기존 행은 임계값 없이 전부 수락한 것으로 본다
+ALTER TABLE capstone.flows_raw
+    ADD COLUMN IF NOT EXISTS pred_accepted        Bool DEFAULT inferred AFTER pred_confidence,
+    ADD COLUMN IF NOT EXISTS confidence_threshold Float32 DEFAULT 0     AFTER pred_accepted;

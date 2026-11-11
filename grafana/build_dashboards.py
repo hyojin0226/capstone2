@@ -4,7 +4,7 @@
 
 규칙 (ADR 0007 결정 3):
   - 007 집계 뷰(flows_dedup, traffic_by_class_*, quality_by_window, pipeline_latency_by_window, pipeline_batches_dedup)와
-    realtime_holdout_accuracy, pipeline_lag만 조회한다 (pipeline_lag는 lag_reporter 하나가 추가만 하는 테이블이라 중복이 없다). flows_raw 같은 테이블을 직접 조회하면 merge 전 중복이 섞인다.
+    realtime_holdout_accuracy, realtime_holdout_selective, pipeline_lag만 조회한다 (pipeline_lag는 lag_reporter 하나가 추가만 하는 테이블이라 중복이 없다). flows_raw 같은 테이블을 직접 조회하면 merge 전 중복이 섞인다.
   - 모든 시계열 쿼리에 $__timeFilter(윈도우 열) 범위 조건을 건다.
   - 시계열은 긴 형식(time, 이름, 값)으로 돌려주면 플러그인이 이름별 시리즈로 바꾼다.
 """
@@ -55,16 +55,17 @@ def stat(title, grid, sql, description="", unit="short") -> dict:
                           "colorMode": "none", "graphMode": "none", "textMode": "value"})
 
 
-CLASSIFIED = "traffic_class NOT IN ('background', 'unclassified')"
+# unknown = 추론했지만 확신도 < 임계값 (docs/confidence-threshold.md)
+CLASSIFIED = "traffic_class NOT IN ('unknown', 'background', 'unclassified')"
 
 panels = [
     # 1행: 요약 수치 (선택한 시간 범위)
     stat("플로우 (정상, 중복 제거)", (0, 0, 6, 4), """
 SELECT sum(flows) FROM capstone.traffic_by_class_10s WHERE $__timeFilter(window_start)""",
          "선택한 범위의 정상 플로우 수. flows_raw FINAL 기준이라 장애 재전송 중복은 한 번만 센다"),
-    stat("분류된 플로우 (추론)", (6, 0, 6, 4), f"""
+    stat("분류된 플로우 (확신 예측)", (6, 0, 6, 4), f"""
 SELECT sum(flows) FROM capstone.traffic_by_class_10s WHERE $__timeFilter(window_start) AND {CLASSIFIED}""",
-         "F2 필터를 통과하고 품질 검사도 통과해 모델이 추론한 플로우"),
+         "모델이 추론했고 확신도가 임계값(기본 0.8) 이상인 플로우. 미달은 unknown (docs/confidence-threshold.md)"),
     stat("거부 (hard reject)", (12, 0, 6, 4), """
 SELECT sum(value) FROM capstone.quality_by_window WHERE $__timeFilter(window_start) AND startsWith(metric, 'rejected:')""",
          "스키마·필드 검사에서 거부되어 flows_rejected로 간 메시지 (Kafka 타임스탬프 기준)"),
@@ -78,16 +79,17 @@ WHERE $__timeFilter(window_start) ORDER BY window_start DESC LIMIT 1""",
 SELECT window_start AS time, traffic_class, flows
 FROM capstone.traffic_by_class_10s
 WHERE $__timeFilter(window_start) AND {CLASSIFIED}
-ORDER BY time""", "예측 클래스 기준 (실제 운영에는 라벨이 없다). 급증 알림이 보는 값", stack=True, bars=True,
+ORDER BY time""", "확신도가 임계값 이상인 예측 클래스 기준 (실제 운영에는 라벨이 없다). 급증 알림이 보는 값", stack=True, bars=True,
        label="traffic_class"),
-    ts("전체 트래픽: 분류 / 배경 / 미분류 플로우 / 10초", (12, 4, 12, 9), f"""
+    ts("전체 트래픽: 분류 / unknown / 배경 / 미분류 플로우 / 10초", (12, 4, 12, 9), f"""
 SELECT window_start AS time,
-       if(traffic_class IN ('background', 'unclassified'), traffic_class, 'classified') AS kind,
+       if(traffic_class IN ('unknown', 'background', 'unclassified'), traffic_class, 'classified') AS kind,
        sum(flows) AS flows
 FROM capstone.traffic_by_class_10s
 WHERE $__timeFilter(window_start)
 GROUP BY time, kind
-ORDER BY time""", "background = F2 필터에서 걸러진 배경 트래픽, unclassified = F2는 통과했지만 soft 품질 검사 실패",
+ORDER BY time""", "unknown = 추론했지만 확신도 미달, background = F2 필터에서 걸러진 배경 트래픽, "
+       "unclassified = F2는 통과했지만 soft 품질 검사 실패",
        stack=True, bars=True, label="kind"),
 
     # 3행: 바이트, 품질
@@ -125,7 +127,8 @@ SELECT model_version, service_class, support, correct, predicted,
        round(precision, 3) AS precision, round(recall, 3) AS recall, round(f1, 3) AS f1
 FROM capstone.realtime_holdout_accuracy
 ORDER BY model_version, service_class""", TABLE)],
-          "학습에서 뺀 세션의 플로우에 대한 스트리밍 추론 결과 (ADR 0003 결정 6). 시간 범위와 무관"),
+          "학습에서 뺀 세션의 플로우에 대한 스트리밍 추론 결과 (ADR 0003 결정 6). 임계값과 무관하게 모든 예측을 채점. "
+          "시간 범위와 무관"),
 
     # 5행: Kafka lag (infra/scripts/lag_reporter.py가 떠 있을 때만 값이 있다, ADR 0007 결정 7)
     ts("Kafka lag: 처리 안 된 메시지 (파티션별)", (0, 37, 12, 8), """
@@ -141,6 +144,16 @@ WHERE $__timeFilter(ts) AND last_batch_age_s >= 0
 GROUP BY time
 ORDER BY time""", "유입이 있는데 이 값이 트리거 간격(5초)보다 계속 크면 Spark가 멈췄거나 배치 하나가 오래 걸리는 중. "
        "유입이 없을 때는 계속 늘어나는 것이 정상", unit="s", label="metric"),
+
+    # 6행: 확신도 임계값 (docs/confidence-threshold.md)
+    panel("table", "held-out: 답한 비율 / 답한 것의 정확도 (확신도 임계값)", (0, 45, 24, 5), [target("""
+SELECT model_version, confidence_threshold AS threshold, flows, answered,
+       round(coverage, 3) AS coverage, round(byte_coverage, 3) AS byte_coverage,
+       round(answered_accuracy, 3) AS answered_accuracy, round(accuracy_all, 3) AS accuracy_all
+FROM capstone.realtime_holdout_selective
+ORDER BY model_version, threshold""", TABLE)],
+          "확신도가 임계값 미만이면 unknown으로 답하지 않는다. coverage = 답한 플로우 비율, byte_coverage = 답한 바이트 비율, "
+          "answered_accuracy = 답한 것의 정확도, accuracy_all = 전부 답했을 때. 시간 범위와 무관"),
 ]
 
 dashboard = {

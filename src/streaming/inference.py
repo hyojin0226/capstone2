@@ -4,7 +4,10 @@
 - Python worker 프로세스마다 처음 한 번만 로딩해서 캐시한다
 - metadata.json의 features 순서로만 피처를 고른다. label·meta(IP·포트)·ts는 모델에 넘기지 않는다
 - 학습 때와 xgboost 버전이 다르면 실패한다 (ADR 0003 결정 2)
-- 추론하지 않는 행: inferred=false, pred_service_class='', pred_confidence=0, model_version=''
+- 추론하지 않는 행: inferred=false, pred_service_class='', pred_confidence=0, model_version='', pred_accepted=false
+- 확신도 임계값 (docs/confidence-threshold.md): pred_accepted = pred_confidence >= CONFIDENCE_THRESHOLD.
+  pred_service_class는 임계값과 무관하게 가장 높은 확률의 클래스를 그대로 남긴다 (나중에 다른 임계값으로 다시 볼 수 있게).
+  수락되지 않은 예측은 뷰에서 traffic_class = 'unknown'이 된다. 그때 쓴 임계값은 confidence_threshold에 남긴다
 
 이 모듈은 Python worker에서도 import된다. 그래서 컨테이너의 PYTHONPATH에 src/streaming이 있어야 한다.
 """
@@ -18,11 +21,16 @@ from pyspark.sql import functions as F
 from pyspark.sql.types import BooleanType, FloatType, StringType, StructField, StructType
 
 MODEL_DIR = Path(os.environ.get("MODEL_DIR", "/opt/app/models/current"))
+CONFIDENCE_THRESHOLD = float(os.environ.get("CONFIDENCE_THRESHOLD", "0.8"))  # 0이면 전부 수락 (임계값 도입 전 동작)
+if not 0.0 <= CONFIDENCE_THRESHOLD <= 1.0:
+    raise ValueError(f"CONFIDENCE_THRESHOLD는 0–1이어야 한다: {CONFIDENCE_THRESHOLD}")
 
 PRED_FIELDS = [
     StructField("inferred", BooleanType()),
     StructField("pred_service_class", StringType()),
     StructField("pred_confidence", FloatType()),
+    StructField("pred_accepted", BooleanType()),
+    StructField("confidence_threshold", FloatType()),
     StructField("model_version", StringType()),
 ]
 
@@ -59,9 +67,13 @@ def _predict_batches(batches):
             idx = proba.argmax(axis=1)
             pdf["pred_service_class"] = classes[idx]
             pdf["pred_confidence"] = proba[np.arange(len(pdf)), idx].astype("float32")
+            # float32로 저장한 값과 같은 기준으로 비교한다 (ClickHouse에서 pred_confidence >= 임계값으로 다시 계산해도 같게)
+            pdf["pred_accepted"] = pdf["pred_confidence"] >= np.float32(CONFIDENCE_THRESHOLD)
         else:
             pdf["pred_service_class"] = []
             pdf["pred_confidence"] = []
+            pdf["pred_accepted"] = []
+        pdf["confidence_threshold"] = np.float32(CONFIDENCE_THRESHOLD)
         pdf["inferred"] = True
         pdf["model_version"] = meta["model_version"]
         yield pdf
@@ -76,5 +88,7 @@ def add_predictions(df: DataFrame) -> DataFrame:
                .withColumn("inferred", F.lit(False))
                .withColumn("pred_service_class", F.lit(""))
                .withColumn("pred_confidence", F.lit(0.0).cast("float"))
+               .withColumn("pred_accepted", F.lit(False))
+               .withColumn("confidence_threshold", F.lit(0.0).cast("float"))
                .withColumn("model_version", F.lit("")))
     return inferred.unionByName(skipped)

@@ -10,7 +10,7 @@ models:
           - not_null
           - accepted_values:
               arguments:
-                values: [chat, email, file_transfer, streaming, voip, background, unclassified]
+                values: [chat, email, file_transfer, streaming, voip, unknown, background, unclassified]
       - name: flows
         data_tests: [not_null]
   - name: quality_hourly

@@ -13,7 +13,7 @@
 | 3. 스트리밍 처리 | 완료 | Spark 추론(mapInPandas), 품질 검사·오류 주입, 멱등 적재, held-out 정확도 | step3-streaming, ADR 0003 |
 | 4. 보존·재처리 | 완료 | SeaweedFS(S3) 원본 보존, 시나리오 ① Kafka 소실 복구, ② 새 모델 재추론 | step4-reprocessing, ADR 0004·0005 |
 | 5. 성능 | 완료 (11-10) | 부하 테스트 도구, 병목 분석, 튜닝 전후 비교, swap 원인 규명 | step5-load (요약 14절), ADR 0006 |
-| 6. dbt·Grafana·알림 | **완료 (11-10)** | 집계 뷰, Grafana 대시보드 14패널·급증 알림, 탐지 지연 측정, Kafka lag, dbt 이력 | step6-dashboard (요약 7절), ADR 0007 |
+| 6. dbt·Grafana·알림 | **완료 (11-10)** | 집계 뷰, Grafana 대시보드 14패널(7단계에 15패널)·급증 알림, 탐지 지연 측정, Kafka lag, dbt 이력 | step6-dashboard (요약 7절), ADR 0007 |
 | 7. 문서화·발표 | **진행 중** | README ✓, 결과 요약 ✓, ADR 색인 ✓, 재현 가이드 ✓ (새 clone·새 볼륨 검증) / 발표 자료, 시연 남음 | 이 문서 4절, docs/results.md |
 
 ## 2. 지금까지 한 것
@@ -28,7 +28,7 @@ PCAP ─(NFStream, 오프라인)→ 플로우 parquet ─(replay producer, 배�
         └─ 쿼리 2: 원문 그대로 → SeaweedFS(S3) Parquet 보존 (1분 트리거, dt/hr 파티션)
    재처리: S3 보존본 → Spark 배치 잡(같은 처리 코드) → ClickHouse (같은 키로 수렴)
    조회: ClickHouse 집계 뷰(flows_dedup, traffic_by_class_10s/1m, quality_by_window, ...)
-        ├─ Grafana (조회 전용 grafana_ro): 대시보드 14패널, 급증 알림 규칙 (파일 프로비저닝)
+        ├─ Grafana (조회 전용 grafana_ro): 대시보드 15패널, 급증 알림 규칙 (파일 프로비저닝)
         └─ dbt → capstone_dbt: 시간별 트래픽·품질, 모델별 일 정확도 (테스트 14개)
    상태: lag_reporter (Kafka 끝 offset − pipeline_batches.end_offsets) → pipeline_lag → Grafana
 ```
@@ -55,6 +55,7 @@ PCAP ─(NFStream, 오프라인)→ 플로우 parquet ─(replay producer, 배�
   - soft flag: 패킷 합, 시간 순서 등
   - 오류 주입 8유형이 모두 기대대로 처리된다 (`verify_step3` 14/14).
 - 실시간 정확도는 held-out 세션에서만 잰다: accuracy 0.746, macro-F1 0.701. 오프라인 평가와 같다.
+- (7단계 추가) 확신도 임계값 0.8 미만은 `unknown` (ADR 0008): 답한 플로우 75%·바이트 94%, 답한 것의 정확도 0.839. `verify_step3` 15/15.
 
 **4단계: 원본 보존과 재처리**
 - MinIO 이미지 배포가 중단되어 SeaweedFS로 바꿨다 (승인).
@@ -87,7 +88,7 @@ PCAP ─(NFStream, 오프라인)→ 플로우 parquet ─(replay producer, 배�
 | 항목 | 결과 |
 |---|---|
 | 집계 뷰 | 검증 3종 통과: 합계 일치, 장애 직후(merge 전 중복 189행) 집계 동일, 재추론 반영 |
-| 대시보드 | Grafana 13.2.5 + ClickHouse 플러그인 4.22.1, 14패널. 패널 값 = 직접 조회(22/22), 빈 볼륨에서 다시 띄워도 같은 구성 |
+| 대시보드 | Grafana 13.2.5 + ClickHouse 플러그인 4.22.1, 15패널. 패널 값 = 직접 조회(23/23), 빈 볼륨에서 다시 띄워도 같은 구성 |
 | 조회 비용 | 패널 p95 ≤ 1초는 `flows_raw` 약 1,500만 행까지. **TTL 미적용**, 운영 범위로 명시 (승인) |
 | 급증 알림 | 닫힌 10초 윈도우 / 직전 5분 평균 > 3. 탐지: 라벨 ×3 0/10, ×5 9/10, ×8 10/10. 지연 p50 35.1초, p95 47.8초. 정상 30분 오탐 0, Spark 재시작 직후 3/3 |
 | Kafka lag | Spark는 Kafka 그룹에 offset을 남기지 않아 직접 계산. 40초 정지 → 재시작 뒤 53초에 정상(28초가 기동) |
@@ -102,7 +103,7 @@ PCAP ─(NFStream, 오프라인)→ 플로우 parquet ─(replay producer, 배�
 |---|---|
 | `infra/scripts/reset_pipeline.sh` | 토픽·테이블·보존본·체크포인트 초기화 후 Spark 기동 |
 | `src/replay/producer.py` | 배속 재생, `--rate/--duration` 일정 속도, `--inject-faults` 오류 주입 |
-| `infra/scripts/verify_step3.py` | 오류 유형별 처리, 회계, 예측 일치, held-out 정확도 (14개 검사) |
+| `infra/scripts/verify_step3.py` | 오류 유형별 처리, 회계, 예측 일치, held-out 정확도 (15개 검사, 확신도 임계값 판정 포함) |
 | `infra/scripts/failure_test.sh` | 쓰기 도중 Spark 강제 종료 → 중복 수렴·손실 0 확인 |
 | `infra/scripts/scenario1_recovery.sh`, `scenario2_reinference.sh` | 보존본 복구, 새 모델 재추론 + 행별 지문 비교 |
 | `infra/scripts/load_test.sh` (+ sampler, summary, plot) | 부하 단계 측정: 처리량, E2E 분위수, 배치 시간, 자원, fault/swap |

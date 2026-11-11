@@ -12,6 +12,7 @@ ADR(Architecture Decision Record)은 결정 하나마다 배경, 대안, 선택 
 | [0005](0005-raw-preservation-and-reprocessing.md) | 원본 보존과 재처리 | Spark 두 번째 쿼리가 원문을 SeaweedFS(S3) Parquet로 보존, 재처리는 보존본 → 같은 처리 코드의 배치 잡. MinIO 대신 SeaweedFS | 채택 (11-04) | step4-reprocessing |
 | [0006](0006-load-test-and-tuning.md) | 부하 테스트와 튜닝 | 일정 속도 replay, 단계별 측정, 가설별 튜닝. 결과: 상한 100k, `minPartitions=6`, swap 금지 | 채택 (11-04), 완료 (11-10) | step5-load (요약 14절) |
 | [0007](0007-dashboard-alerting-dbt.md) | 대시보드·알림·dbt | Grafana + 공식 ClickHouse 플러그인, 조회 전용 사용자, 닫힌 윈도우 급증 규칙, replay 증폭 주입, lag reporter, dbt `insert_overwrite`. TTL 미적용 | 채택·구현 완료 (11-10) | step6-dashboard (요약 7절) |
+| [0008](0008-confidence-threshold.md) | 확신도 임계값 | Spark가 `pred_accepted`(확신도 ≥ 0.8)와 임계값을 기록, argmax 클래스는 보존, 뷰에서 `unknown`. 알림은 확신 예측만 | 채택·구현 완료 (11-11) | confidence-threshold |
 
 승인을 받고 바꾼 결정 (각 ADR에 이유가 있다):
 - MinIO → SeaweedFS 4.48: MinIO 이미지 배포 중단 (0005)

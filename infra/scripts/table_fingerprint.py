@@ -24,7 +24,8 @@ CH_URL = os.environ.get("CLICKHOUSE_HTTP", "http://127.0.0.1:8123/")
 CH_HEADERS = {"X-ClickHouse-User": os.environ.get("CLICKHOUSE_USER", "capstone"),
               "X-ClickHouse-Key": os.environ.get("CLICKHOUSE_PASSWORD", "capstone-dev")}
 PROCESSING_COLUMNS = {"spark_processed_ms", "inserted_at"}
-PREDICTION_COLUMNS = {"inferred", "pred_service_class", "pred_confidence", "model_version"}
+PREDICTION_COLUMNS = {"inferred", "pred_service_class", "pred_confidence", "pred_accepted", "confidence_threshold",
+                      "model_version"}
 TABLES = {"flows_raw": ["flow_id"], "flows_rejected": ["kafka_partition", "kafka_offset"]}
 
 

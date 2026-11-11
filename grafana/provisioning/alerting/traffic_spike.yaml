@@ -1,4 +1,5 @@
 # 트래픽 급증 알림 (ADR 0007 결정 5). 클래스(예측 클래스)마다 하나의 알림 인스턴스가 생긴다.
+# 확신도가 임계값 이상인 예측만 센다. unknown은 클래스가 아니라서 알림 대상이 아니다 (docs/confidence-threshold.md)
 #
 # 규칙: 마지막 "닫힌" 10초 윈도우의 플로우 수 / 직전 5분(10초 윈도우 30개) 평균 > K(3)
 #   - 닫힌 윈도우 = window_end ≤ now − L. L = 15초 (E2E p95를 덮는 허용 지연). 늦게 온 행이 평가한 값을 바꾸지 않게 한다
@@ -38,7 +39,7 @@ groups:
                            uniqExactIf(window_start, window_start < last_closed) AS base_windows
                     FROM capstone.traffic_by_class_10s
                     WHERE window_start >= last_closed - INTERVAL 300 SECOND AND window_start <= last_closed
-                      AND traffic_class NOT IN ('background', 'unclassified')
+                      AND traffic_class NOT IN ('unknown', 'background', 'unclassified')
                     GROUP BY traffic_class
                 )
           - refId: C

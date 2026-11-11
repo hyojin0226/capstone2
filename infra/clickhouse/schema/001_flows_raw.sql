@@ -105,6 +105,8 @@ CREATE TABLE IF NOT EXISTS capstone.flows_raw
     inferred                        Bool,                   -- 추론했는지 (추론 대상: f2_passed AND quality_ok)
     pred_service_class              LowCardinality(String), -- 예측 클래스. 추론 안 했으면 ''
     pred_confidence                 Float32,                -- 예측 클래스의 확률. 추론 안 했으면 0
+    pred_accepted                   Bool DEFAULT inferred,  -- pred_confidence >= confidence_threshold (010). 아니면 뷰에서 unknown
+    confidence_threshold            Float32 DEFAULT 0,      -- 추론할 때 쓴 임계값 (0 = 임계값 도입 전, 전부 수락)
     model_version                   LowCardinality(String), -- 예측에 쓴 모델. 추론 안 했으면 ''
 
     -- Kafka 위치 (추적·누락 확인용)

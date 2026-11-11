@@ -22,6 +22,7 @@ docker run --rm --name spark-batch --network "${COMPOSE_PROJECT_NAME:-capstone2}
   -e REPROCESS_FILTER_BEFORE_PARSE="${REPROCESS_FILTER_BEFORE_PARSE:-true}" \
   -e PYTHONPATH=/opt/app/src/streaming:/opt/app/src/extract:/opt/app/src/reprocess \
   -e MODEL_DIR="/opt/app/models/${MODEL_VERSION:-xgb-20261027-1cc0f57c}" \
+  -e CONFIDENCE_THRESHOLD="${CONFIDENCE_THRESHOLD:-0.8}" \
   -e S3_ENDPOINT=http://seaweedfs:8333 -e S3_ACCESS_KEY=capstone -e S3_SECRET_KEY=capstone-dev-secret \
   -e ARCHIVE_PATH=s3a://capstone-raw/flows.raw \
   -e KAFKA_BOOTSTRAP=kafka:9092 -e KAFKA_TOPIC=flows.raw \
