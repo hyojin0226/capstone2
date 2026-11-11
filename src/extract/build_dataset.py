@@ -28,6 +28,11 @@ def main() -> None:
     kept = pd.concat([kept, labels], axis=1)
     kept["label_noise_suspect"] = noise_suspect(kept)
 
+    # NFStream은 실행마다 플로우를 내보내는 순서(와 파일 안의 id)가 다르다. 학습은 subsample(시드 고정)을 쓰므로
+    # 행 순서가 바뀌면 모델도 바뀐다. 결정적인 flow_id로 정렬해 추출을 다시 해도 같은 데이터셋·모델이 나오게 한다
+    # (docs/reproduce.md "모델 재현성")
+    kept = kept.sort_values(["source_file", "flow_id"], kind="stable").reset_index(drop=True)
+
     args.out.parent.mkdir(parents=True, exist_ok=True)
     kept.to_parquet(args.out, index=False)
 
