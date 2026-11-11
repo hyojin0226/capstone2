@@ -1,5 +1,7 @@
 # 암호화 트래픽 실시간 분석 데이터 플랫폼
 
+[![ci](https://github.com/hyojin0226/capstone2/actions/workflows/ci.yml/badge.svg)](https://github.com/hyojin0226/capstone2/actions/workflows/ci.yml)
+
 캡스톤디자인II 프로젝트. 공개 암호화 트래픽 PCAP(ISCX VPN-nonVPN)에서 NFStream으로 플로우를 추출하고,
 실시간처럼 replay하여 Kafka → Spark Structured Streaming → ClickHouse → Grafana·dbt로 흘려보내는 데이터 파이프라인.
 원본은 S3 호환 저장소(SeaweedFS)에 보존해서 언제든 다시 처리할 수 있다.
@@ -112,7 +114,13 @@ Grafana: http://localhost:3000 → Dashboards → Capstone → "Capstone 파이�
 
 급증 주입은 `--amplify CLASS:FACTOR:START:DURATION`이다. 알림 규칙은 직전 5분을 기준선으로 쓰므로 START는 300초 이후로 둔다. 예: `--duration 420 --amplify streaming:8:330:30` (330초부터 30초 동안 streaming 8배, 알림은 약 25–48초 뒤).
 
-**4. 검증 스크립트 (예)**
+**4. 자동 테스트** (스택 없이 약 1분, push마다 GitHub Actions에서도 돈다. 내용: [tests/README.md](tests/README.md))
+
+```bash
+bash infra/scripts/run_tests.sh        # lint · unit 36 · spark 10 · sql 6
+```
+
+**5. 통합 검증 스크립트 (예)**
 
 | 스크립트 | 확인하는 것 |
 |---|---|

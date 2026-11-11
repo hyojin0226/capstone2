@@ -89,7 +89,7 @@ def main() -> None:
     # QTEST_ENGINE: 시험 테이블의 엔진·정렬 키만 바꿔 비교한다 (flows_raw는 그대로). 비우면 flows_raw와 같은 DDL
     engine = os.environ.get("QTEST_ENGINE", "")
     ch(f"CREATE TABLE {T} AS capstone.flows_raw" + (f" ENGINE = {engine}" if engine else ""))
-    print("qtest: " + one(f"SELECT engine_full FROM system.tables WHERE database = 'capstone' AND name = 'flows_qtest'"), flush=True)
+    print("qtest: " + one("SELECT engine_full FROM system.tables WHERE database = 'capstone' AND name = 'flows_qtest'"), flush=True)
     out_rows, copies = [], 0
     out = os.environ.get("QTEST_OUT", "data/loadtest/query_cost.csv")
     try:
@@ -109,8 +109,8 @@ def main() -> None:
                     t0 = time.time()
                     ch(f"OPTIMIZE TABLE {T} FINAL", timeout=3600)
                     print(f"  OPTIMIZE FINAL {time.time() - t0:.1f}s", flush=True)
-                parts = one(f"SELECT count() FROM system.parts WHERE database = 'capstone' AND table = 'flows_qtest' AND active")
-                size = one(f"SELECT sum(bytes_on_disk) FROM system.parts WHERE database = 'capstone' AND table = 'flows_qtest' AND active")
+                parts = one("SELECT count() FROM system.parts WHERE database = 'capstone' AND table = 'flows_qtest' AND active")
+                size = one("SELECT sum(bytes_on_disk) FROM system.parts WHERE database = 'capstone' AND table = 'flows_qtest' AND active")
                 tag = f"qcost-{n}-{state}-{int(time.time())}"
                 for name, q in queries(lo_t, hi_t).items():
                     r = measure(name, q, repeats, tag)

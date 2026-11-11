@@ -103,6 +103,7 @@ PCAP ─(NFStream, 오프라인)→ 플로우 parquet ─(replay producer, 배�
 |---|---|
 | `infra/scripts/reset_pipeline.sh` | 토픽·테이블·보존본·체크포인트 초기화 후 Spark 기동 |
 | `src/replay/producer.py` | 배속 재생, `--rate/--duration` 일정 속도, `--inject-faults` 오류 주입 |
+| `infra/scripts/run_tests.sh`, `.github/workflows/ci.yml` | 자동 테스트(스택 없이): lint, unit 36, spark 10, sql 6. push마다 CI (tests/README.md) |
 | `infra/scripts/verify_step3.py` | 오류 유형별 처리, 회계, 예측 일치, held-out 정확도 (15개 검사, 확신도 임계값 판정 포함) |
 | `infra/scripts/failure_test.sh` | 쓰기 도중 Spark 강제 종료 → 중복 수렴·손실 0 확인 |
 | `infra/scripts/scenario1_recovery.sh`, `scenario2_reinference.sh` | 보존본 복구, 새 모델 재추론 + 행별 지문 비교 |

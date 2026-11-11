@@ -1,0 +1,3 @@
+# 자동 테스트·린트 (tests/README.md). 오프라인 venv에 추가로 설치한다: pip install -r requirements-dev.txt
+pytest==9.2.0
+ruff==0.17.4

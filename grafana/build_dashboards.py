@@ -81,7 +81,7 @@ FROM capstone.traffic_by_class_10s
 WHERE $__timeFilter(window_start) AND {CLASSIFIED}
 ORDER BY time""", "확신도가 임계값 이상인 예측 클래스 기준 (실제 운영에는 라벨이 없다). 급증 알림이 보는 값", stack=True, bars=True,
        label="traffic_class"),
-    ts("전체 트래픽: 분류 / unknown / 배경 / 미분류 플로우 / 10초", (12, 4, 12, 9), f"""
+    ts("전체 트래픽: 분류 / unknown / 배경 / 미분류 플로우 / 10초", (12, 4, 12, 9), """
 SELECT window_start AS time,
        if(traffic_class IN ('unknown', 'background', 'unclassified'), traffic_class, 'classified') AS kind,
        sum(flows) AS flows

@@ -103,7 +103,9 @@ def parse(raw: DataFrame) -> DataFrame:
     m = raw.select(
         F.col("value").cast("string").alias("raw_value"),
         F.from_json(F.col("value").cast("string"), MESSAGE_SCHEMA).alias("m"),
-        F.coalesce(F.expr(f"cast(filter(headers, h -> h.key = '{FAULT_HEADER}')[0].value as string)"),
+        # get(..., 0): 배열이 비어 있으면 NULL. [0]은 ANSI 모드(Spark 4 기본)에서 예외라, x-fault가 아닌 헤더만 있는
+        # 메시지 하나가 배치 전체를 실패시킨다 (tests/spark/test_parse_quality.py가 찾은 문제)
+        F.coalesce(F.expr(f"cast(get(filter(headers, h -> h.key = '{FAULT_HEADER}'), 0).value as string)"),
                    F.lit("")).alias("fault_type"),
         F.col("partition").alias("kafka_partition"),
         F.col("offset").alias("kafka_offset"),
@@ -210,7 +212,7 @@ def main() -> None:
            .option("includeHeaders", "true")            # 오류 주입 표시(x-fault)를 읽는다
            .load())
 
-    query = (parse(raw).writeStream
+    (parse(raw).writeStream
              .queryName("flows_to_clickhouse")
              .foreachBatch(make_write_batch(meta["model_version"]))
              .option("checkpointLocation", CHECKPOINT)
