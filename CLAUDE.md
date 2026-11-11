@@ -163,4 +163,7 @@ docs/              # 설계 결정 기록(ADR), 성능 실험 결과
     - 발견: NFStream 추출 순서가 실행마다 달라 모델이 바뀜 → build_dataset이 (source_file, flow_id) 정렬. 정렬 후 모델 `54c2c2a4`가 두 레포에서 같음.
       운영 모델 A는 정렬 전 데이터로 학습해 처음부터는 재현 안 됨 (`data/dataset/flows_labeled.legacy-order.parquet`로는 재현). held-out 정확도는 행 순서만으로 0.721–0.746
     - 고침: reset_pipeline.sh·spark_batch.sh가 COMPOSE_PROJECT_NAME을 따름, README 순서(Spark는 reset_pipeline에서 기동)
+  - [x] 정확도 보완 실험 (docs/model-improvements.md, `src/model/eval_improvements.py`): held-out 시드 10개 평균 0.723 (A의 0.746은 높게 나온 경우), 바이트 정확도 0.995.
+    확신도 ≥ 0.9 → 플로우 62%·바이트 94%에 답하고 정확도 0.861. 짧은 플로우 제외·연결 투표는 +0.01–0.02 (투표는 바이트 정확도를 낮춤).
+    다음 후보(승인 필요): Spark에 확신도 임계값(unknown) 적용, NFStream splt(앞쪽 N개 패킷) 피처 오프라인 실험
   - [ ] 발표 자료, 시연 리허설
