@@ -25,7 +25,7 @@ $COMPOSE up -d --wait kafka clickhouse seaweedfs
 # 1. Spark 잡과 체크포인트(적재 + 보존 쿼리)
 $COMPOSE stop spark >/dev/null 2>&1 || true
 $COMPOSE rm -f spark >/dev/null 2>&1 || true
-docker volume rm capstone2_spark-checkpoints >/dev/null 2>&1 || true
+docker volume rm "${COMPOSE_PROJECT_NAME:-capstone2}_spark-checkpoints" >/dev/null 2>&1 || true
 
 # 2. Kafka 토픽
 $KAFKA/kafka-topics.sh --bootstrap-server kafka:9092 --delete --topic flows.raw >/dev/null 2>&1 || true

@@ -16,7 +16,7 @@ MEMSWAP=${SPARK_BATCH_MEMSWAP:-$MEM}   # 비교 실험용. MEM보다 크면 그 
 if [ "$(docker inspect -f '{{.State.Running}}' spark 2>/dev/null)" = "true" ]; then
   echo "warning: streaming spark is running; spark-batch ($MEM) may exceed WSL memory" >&2
 fi
-docker run --rm --name spark-batch --network capstone2_default --memory "$MEM" --memory-swap "$MEMSWAP" \
+docker run --rm --name spark-batch --network "${COMPOSE_PROJECT_NAME:-capstone2}_default" --memory "$MEM" --memory-swap "$MEMSWAP" \
   -v "$PWD/src:/opt/app/src:ro" -v "$PWD/models:/opt/app/models:ro" \
   -e PYTHONDONTWRITEBYTECODE=1 \
   -e REPROCESS_FILTER_BEFORE_PARSE="${REPROCESS_FILTER_BEFORE_PARSE:-true}" \
