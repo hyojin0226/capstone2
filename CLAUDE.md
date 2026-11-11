@@ -177,4 +177,5 @@ docs/              # 설계 결정 기록(ADR), 성능 실험 결과
   - [x] 파이프라인 상태 알림 (docs/pipeline-health-alerts.md): 정지(lag>0 & 배치 없음 30초) 22.2초 탐지, 처리 지연 누적(밀린 초>30, 1분) 과부하에서만,
     정상 10분 오탐 0. 급증 알림 keepFiringFor 30s → refire 0. verify_grafana 24/24
   - [x] 시연 스크립트 infra/scripts/demo.sh + docs/demo-runbook.md, 리허설 1회 통과 (7/7, 알림 2개 울림)
+  - [x] 아키텍처 그림 docs/img/architecture.svg (+ 발표용 PNG 3200×1800), README에 삽입
   - [ ] 발표 자료, 녹화 백업

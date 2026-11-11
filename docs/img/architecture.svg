@@ -1,0 +1,183 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" width="1600" height="900" font-family="'Malgun Gothic','Apple SD Gothic Neo','Noto Sans KR',sans-serif">
+  <title>암호화 트래픽 실시간 분석 파이프라인 아키텍처</title>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#475569"/>
+    </marker>
+    <marker id="ad" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/>
+    </marker>
+    <style>
+      .t  { font-size: 15px; font-weight: 700; fill: #0f172a; }
+      .s  { font-size: 12.5px; fill: #334155; }
+      .xs { font-size: 11.5px; fill: #64748b; }
+      .h  { font-size: 13px; font-weight: 700; fill: #475569; letter-spacing: .3px; }
+      .ln { stroke: #475569; stroke-width: 1.6; fill: none; marker-end: url(#a); }
+      .ld { stroke: #94a3b8; stroke-width: 1.4; fill: none; stroke-dasharray: 5 4; marker-end: url(#ad); }
+      .lb { font-size: 11.5px; fill: #475569; }
+    </style>
+  </defs>
+
+  <rect width="1600" height="900" fill="#ffffff"/>
+  <text x="40" y="48" font-size="24" font-weight="700" fill="#0f172a">암호화 트래픽 실시간 분석 파이프라인</text>
+  <text x="40" y="72" class="s">공개 PCAP → 플로우 replay → Kafka → Spark Structured Streaming → ClickHouse → Grafana · dbt, 원본은 S3에 보존</text>
+
+  <!-- ===== 오프라인 ===== -->
+  <rect x="30" y="92" width="1070" height="118" rx="10" fill="#f8fafc" stroke="#cbd5e1" stroke-dasharray="6 4"/>
+  <text x="46" y="114" class="h">오프라인 (한 번 실행)</text>
+  <g>
+    <rect x="50" y="126" width="150" height="66" rx="8" fill="#f1f5f9" stroke="#94a3b8"/>
+    <text x="125" y="153" text-anchor="middle" class="t">ISCX NonVPN</text>
+    <text x="125" y="174" text-anchor="middle" class="s">PCAP 109개</text>
+
+    <rect x="235" y="126" width="165" height="66" rx="8" fill="#f1f5f9" stroke="#94a3b8"/>
+    <text x="317" y="153" text-anchor="middle" class="t">NFStream 추출</text>
+    <text x="317" y="174" text-anchor="middle" class="s">양방향 플로우 · 통계 피처</text>
+
+    <rect x="435" y="126" width="170" height="66" rx="8" fill="#f1f5f9" stroke="#94a3b8"/>
+    <text x="520" y="153" text-anchor="middle" class="t">플로우 parquet</text>
+    <text x="520" y="174" text-anchor="middle" class="s">364,054행 · 결정적 flow_id</text>
+
+    <rect x="640" y="126" width="230" height="66" rx="8" fill="#f1f5f9" stroke="#94a3b8"/>
+    <text x="755" y="153" text-anchor="middle" class="t">XGBoost 학습</text>
+    <text x="755" y="174" text-anchor="middle" class="s">세션 단위 분할 · IP·포트·시각 제외</text>
+
+    <rect x="905" y="126" width="180" height="66" rx="8" fill="#f1f5f9" stroke="#94a3b8"/>
+    <text x="995" y="153" text-anchor="middle" class="t">모델 산출물</text>
+    <text x="995" y="174" text-anchor="middle" class="s">JSON + 메타데이터</text>
+
+    <line x1="200" y1="159" x2="233" y2="159" class="ln"/>
+    <line x1="400" y1="159" x2="433" y2="159" class="ln"/>
+    <line x1="605" y1="159" x2="638" y2="159" class="ln"/>
+    <line x1="870" y1="159" x2="903" y2="159" class="ln"/>
+  </g>
+
+  <!-- 검증·테스트 -->
+  <rect x="1130" y="92" width="440" height="118" rx="10" fill="#f8fafc" stroke="#cbd5e1" stroke-dasharray="6 4"/>
+  <text x="1146" y="114" class="h">검증</text>
+  <text x="1146" y="142" class="s"><tspan font-weight="700" fill="#0f172a">CI (push마다)</tspan>  lint · unit 36 · Spark 10 · SQL 6</text>
+  <text x="1146" y="166" class="s"><tspan font-weight="700" fill="#0f172a">통합 검증</tspan>  보낸 수 = Kafka offset = 적재 행 수</text>
+  <text x="1146" y="190" class="s"><tspan font-weight="700" fill="#0f172a">장애 주입</tspan>  강제 종료 · Kafka 소실 복구 · 재추론</text>
+
+  <!-- 오프라인 → replay, 모델 → Spark -->
+  <path d="M520,192 V250 H145 V326" class="ln"/>
+  <text x="300" y="244" class="lb">재생 입력</text>
+  <path d="M995,192 V476 H962" class="ln"/>
+  <text x="1003" y="238" class="lb">모델 로드 (버전 고정)</text>
+
+  <!-- ===== 실시간 경로 ===== -->
+  <rect x="40" y="330" width="210" height="150" rx="10" fill="#eff6ff" stroke="#3b82f6"/>
+  <text x="145" y="360" text-anchor="middle" class="t">Replay producer</text>
+  <text x="145" y="386" text-anchor="middle" class="s">배속 · 일정 속도 재생</text>
+  <text x="145" y="408" text-anchor="middle" class="s">오류 주입 8유형 (1%)</text>
+  <text x="145" y="430" text-anchor="middle" class="s">급증 주입 (클래스 × N)</text>
+  <text x="145" y="458" text-anchor="middle" class="xs">confluent-kafka</text>
+
+  <rect x="295" y="345" width="190" height="120" rx="10" fill="#eff6ff" stroke="#3b82f6"/>
+  <text x="390" y="375" text-anchor="middle" class="t">Kafka 4.3</text>
+  <text x="390" y="400" text-anchor="middle" class="s">flows.raw · 파티션 3</text>
+  <text x="390" y="422" text-anchor="middle" class="s">KRaft 단일 노드</text>
+  <text x="390" y="446" text-anchor="middle" class="xs">헤더 x-fault = 주입 표시</text>
+
+  <line x1="250" y1="405" x2="293" y2="405" class="ln"/>
+  <line x1="485" y1="405" x2="528" y2="405" class="ln"/>
+
+  <!-- Spark -->
+  <rect x="530" y="270" width="430" height="335" rx="12" fill="#f5f3ff" stroke="#7c3aed" stroke-width="1.5"/>
+  <text x="548" y="296" class="t">Spark Structured Streaming 4.1</text>
+  <text x="942" y="296" text-anchor="end" class="xs">트리거 5초 · 체크포인트</text>
+  <text x="548" y="320" class="h">적재 쿼리</text>
+  <g>
+    <rect x="548" y="328" width="394" height="32" rx="6" fill="#ffffff" stroke="#c4b5fd"/>
+    <text x="562" y="349" class="s"><tspan font-weight="700" fill="#0f172a">① 파싱</tspan>  명시적 스키마 · schema_version 검사</text>
+    <rect x="548" y="366" width="394" height="32" rx="6" fill="#ffffff" stroke="#c4b5fd"/>
+    <text x="562" y="387" class="s"><tspan font-weight="700" fill="#0f172a">② 품질</tspan>  hard reject → 원문 보관 · soft flag → 추론 제외</text>
+    <rect x="548" y="404" width="394" height="32" rx="6" fill="#ffffff" stroke="#c4b5fd"/>
+    <text x="562" y="425" class="s"><tspan font-weight="700" fill="#0f172a">③ 배경 필터 F2</tspan>  LAN 브로드캐스트 · 인프라 포트</text>
+    <rect x="548" y="442" width="394" height="50" rx="6" fill="#ffffff" stroke="#c4b5fd"/>
+    <text x="562" y="463" class="s"><tspan font-weight="700" fill="#0f172a">④ XGBoost 추론</tspan>  mapInPandas · 학습과 같은 런타임</text>
+    <text x="562" y="482" class="s">확신도 &lt; 0.8 → <tspan font-weight="700" fill="#7c3aed">unknown</tspan> (예측 클래스는 보존)</text>
+    <rect x="548" y="498" width="394" height="32" rx="6" fill="#ffffff" stroke="#c4b5fd"/>
+    <text x="562" y="519" class="s"><tspan font-weight="700" fill="#0f172a">⑤ JDBC 적재</tspan>  플로우 · 거부 · 배치 지표</text>
+  </g>
+  <text x="548" y="556" class="h">보존 쿼리 (독립 체크포인트)</text>
+  <rect x="548" y="564" width="394" height="30" rx="6" fill="#ffffff" stroke="#c4b5fd"/>
+  <text x="562" y="584" class="s">Kafka 레코드 원문 그대로 → S3 Parquet (1분)</text>
+
+  <line x1="942" y1="514" x2="998" y2="514" class="ln"/>
+
+  <!-- ClickHouse -->
+  <rect x="1000" y="270" width="310" height="335" rx="12" fill="#ecfdf5" stroke="#059669" stroke-width="1.5"/>
+  <text x="1018" y="296" class="t">ClickHouse 26.8</text>
+  <text x="1018" y="322" class="s"><tspan font-weight="700" fill="#0f172a">flows_raw</tspan>  ReplacingMergeTree</text>
+  <text x="1030" y="340" class="xs">ORDER BY flow_id → 다시 써도 한 행</text>
+  <text x="1018" y="364" class="s"><tspan font-weight="700" fill="#0f172a">flows_rejected</tspan>  거부 원문 · 사유</text>
+  <text x="1018" y="388" class="s"><tspan font-weight="700" fill="#0f172a">flow_predictions</tspan>  모델별 이력 (MV)</text>
+  <text x="1018" y="412" class="s"><tspan font-weight="700" fill="#0f172a">pipeline_batches · _lag</tspan>  상태</text>
+  <line x1="1018" y1="428" x2="1292" y2="428" stroke="#a7f3d0"/>
+  <text x="1018" y="450" class="h">집계 뷰 (조회 시점 집계)</text>
+  <text x="1018" y="473" class="s">flows_dedup = FINAL, 주입 행 제외</text>
+  <text x="1018" y="495" class="s">클래스별 트래픽 10초 · 1분</text>
+  <text x="1018" y="517" class="s">품질 · E2E 지연 · 배치</text>
+  <text x="1018" y="539" class="s">held-out 정확도 (전부 / 답한 것)</text>
+  <text x="1018" y="571" class="xs">Grafana·dbt는 뷰만 조회한다</text>
+  <text x="1018" y="588" class="xs">(merge 전 중복이 섞이지 않게)</text>
+
+  <!-- Grafana, dbt -->
+  <rect x="1355" y="270" width="215" height="160" rx="12" fill="#fff7ed" stroke="#ea580c" stroke-width="1.5"/>
+  <text x="1373" y="296" class="t">Grafana 13</text>
+  <text x="1373" y="322" class="s">대시보드 15패널</text>
+  <text x="1373" y="346" class="s">알림 3개</text>
+  <text x="1381" y="368" class="s">· 트래픽 급증</text>
+  <text x="1381" y="390" class="s">· 파이프라인 정지 · 처리 지연</text>
+  <text x="1373" y="416" class="xs">조회 전용 grafana_ro</text>
+
+  <rect x="1355" y="455" width="215" height="150" rx="12" fill="#fff7ed" stroke="#ea580c" stroke-width="1.5"/>
+  <text x="1373" y="481" class="t">dbt 1.12</text>
+  <text x="1373" y="507" class="s">traffic_hourly</text>
+  <text x="1373" y="529" class="s">quality_hourly</text>
+  <text x="1373" y="551" class="s">model_accuracy_daily</text>
+  <text x="1373" y="579" class="xs">테스트 18개 (합계 일치 포함)</text>
+
+  <line x1="1310" y1="350" x2="1353" y2="350" class="ln"/>
+  <line x1="1310" y1="530" x2="1353" y2="530" class="ln"/>
+
+  <!-- ===== 보존·재처리·lag ===== -->
+  <rect x="548" y="650" width="230" height="110" rx="10" fill="#ecfdf5" stroke="#059669"/>
+  <text x="663" y="678" text-anchor="middle" class="t">SeaweedFS (S3)</text>
+  <text x="663" y="703" text-anchor="middle" class="s">원문 Parquet · dt/hr 파티션</text>
+  <text x="663" y="725" text-anchor="middle" class="s">Kafka 보존 기간과 무관</text>
+  <text x="663" y="747" text-anchor="middle" class="xs">모델 산출물도 보관</text>
+
+  <rect x="815" y="650" width="260" height="110" rx="10" fill="#f5f3ff" stroke="#7c3aed"/>
+  <text x="945" y="678" text-anchor="middle" class="t">재처리 배치 잡</text>
+  <text x="945" y="703" text-anchor="middle" class="s">S3 보존본 → 같은 parse·추론 코드</text>
+  <text x="945" y="725" text-anchor="middle" class="s">같은 flow_id로 수렴 (지문 차이 0)</text>
+  <text x="945" y="747" text-anchor="middle" class="xs">새 모델로 과거 데이터 재추론</text>
+
+  <rect x="1110" y="650" width="200" height="110" rx="10" fill="#eff6ff" stroke="#3b82f6"/>
+  <text x="1210" y="678" text-anchor="middle" class="t">lag_reporter</text>
+  <text x="1210" y="703" text-anchor="middle" class="s">5초마다 Kafka 끝 offset</text>
+  <text x="1210" y="725" text-anchor="middle" class="s">− 적재까지 끝난 offset</text>
+  <text x="1210" y="747" text-anchor="middle" class="xs">→ pipeline_lag</text>
+
+  <line x1="663" y1="594" x2="663" y2="648" class="ln"/>
+  <line x1="778" y1="705" x2="813" y2="705" class="ln"/>
+  <path d="M1075,680 H1088 V607" class="ld"/>
+  <path d="M1250,650 V607" class="ld"/>
+  <path d="M390,465 V790 H1210 V762" class="ld"/>
+  <text x="404" y="782" class="lb">끝 offset 조회 (소비자 그룹 가입 없음)</text>
+
+  <!-- ===== 원칙 ===== -->
+  <g font-size="12.5">
+    <rect x="40" y="815" width="560" height="56" rx="8" fill="#f8fafc" stroke="#cbd5e1"/>
+    <text x="56" y="838" class="s"><tspan font-weight="700" fill="#0f172a">멱등 적재</tspan>  결정적 flow_id(BLAKE2b) + ReplacingMergeTree</text>
+    <text x="56" y="858" class="xs">at-least-once. 장애로 다시 쓴 행은 같은 키로 수렴한다 (exactly-once는 주장하지 않음)</text>
+    <rect x="615" y="815" width="460" height="56" rx="8" fill="#f8fafc" stroke="#cbd5e1"/>
+    <text x="631" y="838" class="s"><tspan font-weight="700" fill="#0f172a">누수 방지</tspan>  IP·포트·시각은 피처에서 제외, 세션 단위 분할</text>
+    <text x="631" y="858" class="xs">실시간 정확도는 학습에서 뺀 held-out 세션에서만 잰다</text>
+    <rect x="1090" y="815" width="480" height="56" rx="8" fill="#f8fafc" stroke="#cbd5e1"/>
+    <text x="1106" y="838" class="s"><tspan font-weight="700" fill="#0f172a">단일 머신</tspan>  docker-compose · WSL 16 GB, swap 금지</text>
+    <text x="1106" y="858" class="xs">처리 약 14,000–15,500 msg/s · E2E p50 약 5초 (5,000 msg/s)</text>
+  </g>
+</svg>

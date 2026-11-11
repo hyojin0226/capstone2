@@ -21,6 +21,12 @@
 
 ## 아키텍처
 
+![아키텍처](docs/img/architecture.svg)
+
+발표용 PNG: [docs/img/architecture.png](docs/img/architecture.png) (3200×1800). 원본 SVG를 고친 뒤 브라우저 헤드리스 스크린샷으로 만든다.
+
+<details><summary>텍스트 버전</summary>
+
 ```
 PCAP ─(NFStream, 오프라인)→ 플로우 parquet (364,054개) ─ XGBoost 오프라인 학습 → models/<version>
           │
@@ -35,6 +41,8 @@ ClickHouse 집계 뷰 ─┬─ Grafana: 대시보드, 급증 알림 (조회 전
                     └─ dbt: 시간별 트래픽·품질, 모델별 정확도 이력 (테스트 14개)
 lag_reporter: Kafka 끝 offset − Spark가 적재까지 끝낸 위치 → Grafana
 ```
+
+</details>
 
 핵심 설계 결정 (이유는 [ADR 색인](docs/adr/README.md)):
 - **결정적 `flow_id` + ReplacingMergeTree:** 같은 데이터를 몇 번 보내도 한 행으로 수렴한다. Exactly-once는 주장하지 않는다.
