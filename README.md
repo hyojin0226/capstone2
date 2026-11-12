@@ -159,6 +159,7 @@ bash infra/scripts/run_tests.sh        # lint · unit 36 · spark 10 · sql 6
 | [docs/pipeline-health-alerts.md](docs/pipeline-health-alerts.md) | 파이프라인 정지·처리 지연 알림, 급증 알림 refire 정리 |
 | [docs/demo-runbook.md](docs/demo-runbook.md) | 발표 시연 순서, 전날 준비, 예상 질문, 현장 대처 (`infra/scripts/demo.sh`) |
 | [docs/confidence-threshold.md](docs/confidence-threshold.md) | 확신도 임계값을 파이프라인에 적용: 검증, held-out 결과, 알림 재측정 |
+| [docs/model-tuning-sni.md](docs/model-tuning-sni.md) | 하이퍼파라미터 탐색, SNI 피처, 앱 단위 제외 평가 (운영 설정 유지) |
 | [docs/model-sequence-features.md](docs/model-sequence-features.md) | 패킷 시퀀스 피처 실험 (효과 없음, 원인: 세션 고유 패턴) |
 | [docs/step6-dashboard.md](docs/step6-dashboard.md) | 집계 뷰, Grafana, 알림·탐지 지연, lag, dbt (요약 7절) |
 | [infra/README.md](infra/README.md) | 서비스별 실행·검증 명령 |

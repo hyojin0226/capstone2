@@ -178,4 +178,6 @@ docs/              # 설계 결정 기록(ADR), 성능 실험 결과
     정상 10분 오탐 0. 급증 알림 keepFiringFor 30s → refire 0. verify_grafana 24/24
   - [x] 시연 스크립트 infra/scripts/demo.sh + docs/demo-runbook.md, 리허설 1회 통과 (7/7, 알림 2개 울림)
   - [x] 아키텍처 그림 docs/img/architecture.svg (+ 발표용 PNG 3200×1800), README에 삽입
+  - [x] 하이퍼파라미터 탐색·SNI 피처 실험 (docs/model-tuning-sni.md, src/model/eval_tuning_sni.py): 튜닝 held-out +0.013(가중치 끈 효과, 운영 지점에선 이득 없음),
+    SNI held-out +0.049지만 앱 단위 제외 +0.005 → 둘 다 미채택, 운영 모델 A 유지 (사용자 결정 2026-11-12)
   - [ ] 발표 자료, 녹화 백업
