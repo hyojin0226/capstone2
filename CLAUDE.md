@@ -180,4 +180,6 @@ docs/              # 설계 결정 기록(ADR), 성능 실험 결과
   - [x] 아키텍처 그림 docs/img/architecture.svg (+ 발표용 PNG 3200×1800), README에 삽입
   - [x] 하이퍼파라미터 탐색·SNI 피처 실험 (docs/model-tuning-sni.md, src/model/eval_tuning_sni.py): 튜닝 held-out +0.013(가중치 끈 효과, 운영 지점에선 이득 없음),
     SNI held-out +0.049지만 앱 단위 제외 +0.005 → 둘 다 미채택, 운영 모델 A 유지 (사용자 결정 2026-11-12)
-  - [ ] 발표 자료, 녹화 백업
+  - [x] 마무리 점검: 문서 수치 일관성(다이어그램 dbt 테스트 수 등 수정, results.md 모델 절 재구성), 새 clone·새 볼륨 재검증 (reproduce.md 7절):
+    tests 52, 모델 해시 54c2c2a4 동일, verify_step3 15/15, archive 4/4, dbt 18/18, demo 7/7·알림 2개, grafana 24/24
+  - [ ] 발표 자료, 녹화 백업 (사용자: 주말 제작)
