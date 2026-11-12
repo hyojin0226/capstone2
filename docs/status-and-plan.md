@@ -28,7 +28,7 @@ PCAP ─(NFStream, 오프라인)→ 플로우 parquet ─(replay producer, 배�
         └─ 쿼리 2: 원문 그대로 → SeaweedFS(S3) Parquet 보존 (1분 트리거, dt/hr 파티션)
    재처리: S3 보존본 → Spark 배치 잡(같은 처리 코드) → ClickHouse (같은 키로 수렴)
    조회: ClickHouse 집계 뷰(flows_dedup, traffic_by_class_10s/1m, quality_by_window, ...)
-        ├─ Grafana (조회 전용 grafana_ro): 대시보드 15패널, 급증 알림 규칙 (파일 프로비저닝)
+        ├─ Grafana (조회 전용 grafana_ro): 대시보드 15패널, 알림 규칙 3개: 급증·정지·처리 지연 (파일 프로비저닝)
         └─ dbt → capstone_dbt: 시간별 트래픽·품질, 모델별 일 정확도 (테스트 14개)
    상태: lag_reporter (Kafka 끝 offset − pipeline_batches.end_offsets) → pipeline_lag → Grafana
 ```
@@ -88,7 +88,7 @@ PCAP ─(NFStream, 오프라인)→ 플로우 parquet ─(replay producer, 배�
 | 항목 | 결과 |
 |---|---|
 | 집계 뷰 | 검증 3종 통과: 합계 일치, 장애 직후(merge 전 중복 189행) 집계 동일, 재추론 반영 |
-| 대시보드 | Grafana 13.2.5 + ClickHouse 플러그인 4.22.1, 15패널. 패널 값 = 직접 조회(23/23), 빈 볼륨에서 다시 띄워도 같은 구성 |
+| 대시보드 | Grafana 13.2.5 + ClickHouse 플러그인 4.22.1, 15패널. 패널 값 = 직접 조회, 알림 규칙 3개 평가 정상(24/24), 빈 볼륨에서 다시 띄워도 같은 구성 |
 | 조회 비용 | 패널 p95 ≤ 1초는 `flows_raw` 약 1,500만 행까지. **TTL 미적용**, 운영 범위로 명시 (승인) |
 | 급증 알림 | 닫힌 10초 윈도우 / 직전 5분 평균 > 3. 탐지: 라벨 ×3 0/10, ×5 9/10, ×8 10/10. 지연 p50 35.1초, p95 47.8초. 정상 30분 오탐 0, Spark 재시작 직후 3/3 |
 | Kafka lag | Spark는 Kafka 그룹에 offset을 남기지 않아 직접 계산. 40초 정지 → 재시작 뒤 53초에 정상(28초가 기동) |
@@ -235,7 +235,7 @@ PCAP ─(NFStream, 오프라인)→ 플로우 parquet ─(replay producer, 배�
 |---|---|
 | `README.md` | 프로젝트 한 줄 요약, 아키텍처 그림, 빠른 실행(사전 준비 → compose → replay → 대시보드), 결과 요약 표, 문서 지도 |
 | 결과 요약 (`docs/results.md`) | KPI별 대표 수치와 근거 링크: 처리량(튜닝 전후 그래프), E2E 지연, 신뢰성(장애·복구·재추론 검증), 모니터링(탐지 지연) |
-| ADR 색인 | 0001–0007의 결정 한 줄씩과 상태 |
+| ADR 색인 | 0001–0008의 결정 한 줄씩과 상태 |
 | 재현 가이드 | 데이터 다운로드(수동), 추출, 모델 학습, 실험 스크립트 실행 순서, WSL 주의사항 |
 | 한계와 다음 과제 | 단일 머신·replay 타임라인의 한계, 모델 일반화, H9c, 확장 방향 |
 

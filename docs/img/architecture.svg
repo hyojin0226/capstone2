@@ -137,7 +137,7 @@
   <text x="1373" y="507" class="s">traffic_hourly</text>
   <text x="1373" y="529" class="s">quality_hourly</text>
   <text x="1373" y="551" class="s">model_accuracy_daily</text>
-  <text x="1373" y="579" class="xs">테스트 18개 (합계 일치 포함)</text>
+  <text x="1373" y="579" class="xs">데이터 테스트 14개 (합계 일치 포함)</text>
 
   <line x1="1310" y1="350" x2="1353" y2="350" class="ln"/>
   <line x1="1310" y1="530" x2="1353" y2="530" class="ln"/>
